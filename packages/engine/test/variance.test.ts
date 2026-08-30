@@ -21,7 +21,7 @@ const task = (id: string, overrides: Partial<Task> = {}): Task => ({
 
 describe('captureBaseline', () => {
   it('freezes work and extent per task', () => {
-    const baseline = captureBaseline([task('framing')], h(0), calendar)
+    const baseline = captureBaseline({ tasks: [task('framing')], capturedAt: h(0), calendar })
     expect(baseline.entries).toHaveLength(1)
     expect(baseline.entries[0]).toMatchObject({ taskId: 'framing', duration: 60, effort: 240 })
     expect(baseline.entries[0]!.start).toEqual(BASE)
@@ -31,18 +31,18 @@ describe('captureBaseline', () => {
   it('derives work for a duration-driven task', () => {
     const curing = task('curing', { basis: 'duration', duration: 56, resourceCount: 2 })
     delete (curing as { effort?: number }).effort
-    expect(captureBaseline([curing], h(0), calendar).entries[0]!.effort).toBe(112)
+    expect(captureBaseline({ tasks: [curing], capturedAt: h(0), calendar }).entries[0]!.effort).toBe(112)
   })
 
   it('uses supplied placement over stored dates', () => {
     const placement = new Map([['framing', { start: h(10), finish: h(70) }]])
-    const baseline = captureBaseline([task('framing')], h(0), calendar, placement)
+    const baseline = captureBaseline({ tasks: [task('framing')], capturedAt: h(0), calendar, placement })
     expect(baseline.entries[0]!.start).toEqual(h(10))
   })
 
   it('records when it was taken, and does not alias the date', () => {
     const at = h(5)
-    const baseline = captureBaseline([task('a')], at, calendar)
+    const baseline = captureBaseline({ tasks: [task('a')], capturedAt: at, calendar })
     at.setTime(0)
     expect(baseline.capturedAt).toEqual(h(5))
   })
@@ -51,7 +51,7 @@ describe('captureBaseline', () => {
 describe('the worked example', () => {
   // 240 units estimated, 4 resources. Crew reports 40% done; timesheets show 120 hours burned.
   const framing = task('framing', { percentComplete: 40, actualHours: 120 })
-  const baseline = captureBaseline([task('framing')], h(0), calendar)
+  const baseline = captureBaseline({ tasks: [task('framing')], capturedAt: h(0), calendar })
   const result = calculateProgressVariance({ tasks: [framing], calendar, baseline })
   const variance = result.tasks[0]!
 
@@ -102,7 +102,7 @@ describe('the threshold', () => {
 
 describe('baselines and change orders', () => {
   it('measures against the baseline, not a revised estimate', () => {
-    const baseline = captureBaseline([task('framing')], h(0), calendar) // 240 committed
+    const baseline = captureBaseline({ tasks: [task('framing')], capturedAt: h(0), calendar }) // 240 committed
 
     // A change order adds 40 units. Without a baseline the variance would silently rebase.
     const revised = task('framing', {
@@ -122,7 +122,7 @@ describe('baselines and change orders', () => {
   })
 
   it('reports schedule variance against the frozen dates', () => {
-    const baseline = captureBaseline([task('framing')], h(0), calendar)
+    const baseline = captureBaseline({ tasks: [task('framing')], capturedAt: h(0), calendar })
     const slipped = task('framing', { start: h(24) })
     const result = calculateProgressVariance({ tasks: [slipped], calendar, baseline })
     expect(result.tasks[0]!.startVarianceHours).toBe(24)
@@ -131,7 +131,7 @@ describe('baselines and change orders', () => {
   })
 
   it('reports negative variance for work running early', () => {
-    const baseline = captureBaseline([task('a', { start: h(48) })], h(0), calendar)
+    const baseline = captureBaseline({ tasks: [task('a', { start: h(48) })], capturedAt: h(0), calendar })
     const early = task('a', { start: h(24) })
     expect(
       calculateProgressVariance({ tasks: [early], calendar, baseline }).tasks[0]!
@@ -140,7 +140,7 @@ describe('baselines and change orders', () => {
   })
 
   it('handles a task added after the baseline was taken', () => {
-    const baseline = captureBaseline([task('original')], h(0), calendar)
+    const baseline = captureBaseline({ tasks: [task('original')], capturedAt: h(0), calendar })
     const result = calculateProgressVariance({
       tasks: [task('original'), task('added')],
       calendar,
@@ -279,7 +279,7 @@ describe('properties', () => {
     fc.assert(
       fc.property(anyProgress, (spec) => {
         const built = build(spec)
-        const baseline = captureBaseline([built], h(0), calendar)
+        const baseline = captureBaseline({ tasks: [built], capturedAt: h(0), calendar })
         const result = calculateProgressVariance({ tasks: [built], calendar, baseline })
         expect(result.tasks[0]!.startVarianceHours).toBe(0)
         expect(result.tasks[0]!.finishVarianceHours).toBe(0)

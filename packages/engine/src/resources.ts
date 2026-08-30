@@ -203,43 +203,76 @@ interface SweptWindow {
 /**
  * Sweep a set of spans and return the maximal windows where `exceeds` holds.
  *
+ * A true sweep line: sort the endpoints once, then walk them carrying a running total and the
+ * set of spans currently open. The obvious alternative - for each boundary, scan every span to
+ * see which overlap it - is quadratic, and a schedule with a few thousand tasks on one trade
+ * makes that painful for no reason.
+ *
  * Adjacent segments with the same set of active tasks are merged, so a conflict reads as one
  * window rather than being chopped up at every unrelated boundary in the schedule.
  */
 function sweep(spans: readonly Span[], exceeds: (total: number) => boolean): SweptWindow[] {
-  if (spans.length < 2) {
-    const only = spans[0]
-    if (only === undefined || !exceeds(only.weight)) return []
-    return [{ from: only.from, to: only.to, total: only.weight, taskIds: [only.taskId] }]
+  if (spans.length === 0) return []
+
+  interface Event {
+    at: number
+    span: Span
+    entering: boolean
   }
 
-  const boundaries = [...new Set(spans.flatMap((span) => [span.from, span.to]))].sort(
-    (a, b) => a - b,
-  )
+  const events: Event[] = []
+  for (const span of spans) {
+    events.push({ at: span.from, span, entering: true })
+    events.push({ at: span.to, span, entering: false })
+  }
+  // Exits before entries at the same instant, so tasks that merely touch never count as
+  // overlapping - one finishing exactly as the next starts is not a conflict.
+  events.sort((a, b) => a.at - b.at || Number(a.entering) - Number(b.entering))
 
+  const active = new Set<Span>()
   const windows: SweptWindow[] = []
-  for (let index = 0; index < boundaries.length - 1; index++) {
-    const from = boundaries[index]!
-    const to = boundaries[index + 1]!
+  let running = 0
+  let index = 0
 
-    const active = spans.filter((span) => span.from < to && span.to > from)
-    if (active.length === 0) continue
+  while (index < events.length) {
+    const at = events[index]!.at
+    while (index < events.length && events[index]!.at === at) {
+      const event = events[index]!
+      index += 1
+      if (event.entering) {
+        active.add(event.span)
+        running += event.span.weight
+      } else {
+        active.delete(event.span)
+        running -= event.span.weight
+      }
+    }
 
-    const total = active.reduce((sum, span) => sum + span.weight, 0)
-    if (!exceeds(total)) continue
+    const next = events[index]?.at
+    if (next === undefined) break
+    if (active.size === 0 || !exceeds(running)) continue
 
-    const taskIds = active.map((span) => span.taskId).sort()
+    // Recomputed rather than reported from the running total: fractional weights accumulate
+    // rounding across thousands of additions, and the figure is shown to a user.
+    let total = 0
+    const taskIds: string[] = []
+    for (const span of active) {
+      total += span.weight
+      taskIds.push(span.taskId)
+    }
+    taskIds.sort()
+
     const previous = windows[windows.length - 1]
     if (
       previous !== undefined &&
-      previous.to === from &&
+      previous.to === at &&
       previous.taskIds.length === taskIds.length &&
       previous.taskIds.every((id, position) => id === taskIds[position])
     ) {
-      previous.to = to
+      previous.to = next
       continue
     }
-    windows.push({ from, to, total, taskIds })
+    windows.push({ from: at, to: next, total, taskIds })
   }
 
   return windows

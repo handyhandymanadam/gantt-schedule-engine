@@ -190,8 +190,14 @@ export function rollUpParents(
     const extents = childIds.map(extentOf).filter((entry) => entry !== undefined)
     if (extents.length === 0) continue
 
-    const start = new Date(Math.min(...extents.map((entry) => entry.start.getTime())))
-    const finish = new Date(Math.max(...extents.map((entry) => entry.finish.getTime())))
+    let earliest = Number.POSITIVE_INFINITY
+    let latest = Number.NEGATIVE_INFINITY
+    for (const entry of extents) {
+      earliest = Math.min(earliest, entry.start.getTime())
+      latest = Math.max(latest, entry.finish.getTime())
+    }
+    const start = new Date(earliest)
+    const finish = new Date(latest)
 
     let effort = 0
     let actualHours = 0
@@ -249,7 +255,10 @@ function containment(source: string, target: string): Link {
 
 function earliestStart(tasks: readonly Task[]): Date | undefined {
   if (tasks.length === 0) return undefined
-  return new Date(Math.min(...tasks.map((task) => task.start.getTime())))
+  // A loop rather than Math.min(...spread): spreading a large array exhausts the call stack.
+  let earliest = Number.POSITIVE_INFINITY
+  for (const task of tasks) earliest = Math.min(earliest, task.start.getTime())
+  return new Date(earliest)
 }
 
 /** Every leaf beneath a parent, at any depth. */
@@ -271,17 +280,40 @@ function leafDescendants(
 
 /** Parents ordered so that a parent always follows its own children. */
 function orderBottomUp(parents: ReadonlySet<string>, byId: ReadonlyMap<string, Task>): string[] {
+  // Depths are computed once and memoised. Calling this from inside the comparator walked the
+  // ancestor chain O(n log n) times for no gain.
+  const depths = new Map<string, number>()
+
   const depthOf = (id: string): number => {
-    let depth = 0
-    let current = byId.get(id)
+    const known = depths.get(id)
+    if (known !== undefined) return known
+
+    const chain: string[] = []
+    let current: Task | undefined = byId.get(id)
     const seen = new Set<string>([id])
+    let depth = 0
+
     while (current?.parentId !== undefined) {
-      if (seen.has(current.parentId)) break // guard against a parent cycle; validate() reports it
+      const cached = depths.get(current.parentId)
+      if (cached !== undefined) {
+        depth = cached + 1
+        break
+      }
+      if (seen.has(current.parentId)) break // a parent cycle; validate() reports it
       seen.add(current.parentId)
-      depth += 1
+      chain.push(current.id)
       current = byId.get(current.parentId)
+      depth += 1
+    }
+
+    depths.set(id, depth)
+    // Everything on the way up is now known too.
+    for (let index = chain.length - 1; index >= 0; index--) {
+      depths.set(chain[index]!, depth - (chain.length - 1 - index))
     }
     return depth
   }
-  return [...parents].sort((a, b) => depthOf(b) - depthOf(a))
+
+  for (const id of parents) depthOf(id)
+  return [...parents].sort((a, b) => (depths.get(b) ?? 0) - (depths.get(a) ?? 0))
 }

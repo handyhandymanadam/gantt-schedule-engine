@@ -103,22 +103,29 @@ export interface ProgressVarianceInput {
  * two baselines - the original commitment and the post-change-order plan - is just calling this
  * twice and keeping both.
  */
-export function captureBaseline(
-  tasks: readonly Task[],
-  capturedAt: Date,
-  calendar: Calendar,
-  placement?: ReadonlyMap<string, { start: Date; finish: Date }>,
-): Baseline {
+export interface CaptureBaselineInput {
+  tasks: readonly Task[]
+  /** When the snapshot was taken. Required rather than defaulted: the engine reads no clock. */
+  capturedAt: Date
+  calendar: Calendar
+  /** Scheduled dates, typically `autoSchedule`'s output. Falls back to each task's own dates. */
+  placement?: ReadonlyMap<string, { start: Date; finish: Date }>
+}
+
+export function captureBaseline(input: CaptureBaselineInput): Baseline {
+  const { tasks, capturedAt, calendar, placement } = input
+
   const entries: BaselineEntry[] = tasks.map((task) => {
     const extent = extentOf(task, calendar, placement)
-    const entry: BaselineEntry = {
+    return {
       taskId: task.id,
-      start: extent.start,
-      finish: extent.finish,
+      // Copied, never referenced. A baseline exists to hold still; sharing Date objects with
+      // live tasks means editing a task silently rewrites what it is being measured against.
+      start: new Date(extent.start.getTime()),
+      finish: new Date(extent.finish.getTime()),
       duration: task.duration,
+      effort: task.effort ?? task.duration * task.resourceCount,
     }
-    const effort = task.effort ?? task.duration * task.resourceCount
-    return { ...entry, effort }
   })
 
   return { capturedAt: new Date(capturedAt.getTime()), entries }
@@ -202,16 +209,18 @@ export function calculateProgressVariance(input: ProgressVarianceInput): Progres
 
   if (variances.length === 0) return result
 
-  const projectFinish = new Date(
-    Math.max(...variances.map((entry) => entry.currentFinish.getTime())),
-  )
+  let latestFinish = Number.NEGATIVE_INFINITY
+  for (const entry of variances) latestFinish = Math.max(latestFinish, entry.currentFinish.getTime())
+  const projectFinish = new Date(latestFinish)
   const baselineFinishes = variances
     .map((entry) => entry.baselineFinish)
     .filter((value): value is Date => value !== undefined)
 
   if (baselineFinishes.length === 0) return { ...result, projectFinish }
 
-  const baselineFinish = new Date(Math.max(...baselineFinishes.map((date) => date.getTime())))
+  let latestBaseline = Number.NEGATIVE_INFINITY
+  for (const date of baselineFinishes) latestBaseline = Math.max(latestBaseline, date.getTime())
+  const baselineFinish = new Date(latestBaseline)
   return {
     ...result,
     projectFinish,

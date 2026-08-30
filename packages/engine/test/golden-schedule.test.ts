@@ -243,7 +243,7 @@ describe('golden schedule', () => {
   })
 
   it('produces stable earned value once work is under way', () => {
-    const baseline = captureBaseline(scheduled.tasks, START, calendar)
+    const baseline = captureBaseline({ tasks: scheduled.tasks, capturedAt: START, calendar })
 
     // Report progress on the first two phases, with the crew running slightly behind.
     const underway = scheduled.tasks.map((task) => {

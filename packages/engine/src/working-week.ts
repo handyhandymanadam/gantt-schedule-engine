@@ -84,6 +84,16 @@ export class WorkingWeekCalendar implements Calendar {
   private readonly exceptions: Map<string, Interval[]>
   private readonly offset: number | UtcOffsetResolver
 
+  /** Working minutes for each weekday, and for a whole week: the repeating pattern. */
+  private readonly weekdayMinutes: number[] = []
+  private readonly weeklyMinutes: number = 0
+  /** Weekdays that have any work, for counting days rather than minutes. */
+  private readonly weekdayIsWorking: boolean[] = []
+  private readonly workingDaysPerWeek: number = 0
+  /** Dates that depart from the pattern, as day indices, sorted so a range can be binary-searched. */
+  private readonly overrideDays: number[] = []
+  private readonly overrideMinutes = new Map<number, number>()
+
   constructor(options: WorkingWeekOptions = {}) {
     const { week = DEFAULT_WEEK, holidays = [], exceptions = {}, utcOffsetMinutes = 0 } = options
 
@@ -123,6 +133,99 @@ export class WorkingWeekCalendar implements Calendar {
     const workingDayCount = [...this.week.values()].filter((day) => day.length > 0).length
     this.nominalHoursPerDay =
       workingDayCount === 0 ? 8 : weeklyMinutes / workingDayCount / 60
+
+    // The week repeats, so its shape is worth computing once. Summing a long range then becomes
+    // arithmetic on whole weeks plus a handful of exceptional dates, instead of a walk over every
+    // day in it - which is what made measuring a multi-year span cost milliseconds.
+    for (let day = 0 as Weekday; day <= 6; day = (day + 1) as Weekday) {
+      const minutes = (this.week.get(day) ?? []).reduce(
+        (total, interval) => total + (interval.end - interval.start),
+        0,
+      )
+      this.weekdayMinutes[day] = minutes
+      this.weekdayIsWorking[day] = minutes > 0
+    }
+    this.weeklyMinutes = this.weekdayMinutes.reduce((total, minutes) => total + minutes, 0)
+    this.workingDaysPerWeek = this.weekdayIsWorking.filter(Boolean).length
+
+    const overrides = new Set<number>()
+    for (const key of this.holidays) overrides.add(dayIndexOfKey(key))
+    for (const key of this.exceptions.keys()) overrides.add(dayIndexOfKey(key))
+    this.overrideDays = [...overrides].sort((a, b) => a - b)
+    for (const dayIndex of this.overrideDays) {
+      this.overrideMinutes.set(dayIndex, this.minutesFromIntervals(this.intervalsForDay(dayIndex)))
+    }
+  }
+
+  private minutesFromIntervals(intervals: readonly Interval[]): number {
+    let total = 0
+    for (const interval of intervals) total += interval.end - interval.start
+    return total
+  }
+
+  /**
+   * Working minutes across whole days `fromDay` to `toDay` inclusive.
+   *
+   * Exact, not an approximation: a fully contained day always contributes its pattern's minutes,
+   * whatever the offset that day happens to have, because a shift's length does not change when
+   * the clocks do.
+   */
+  private patternMinutes(fromDay: number, toDay: number): number {
+    if (toDay < fromDay) return 0
+
+    const days = toDay - fromDay + 1
+    const weeks = Math.floor(days / 7)
+    let total = weeks * this.weeklyMinutes
+
+    for (let day = fromDay + weeks * 7; day <= toDay; day++) {
+      total += this.weekdayMinutes[weekdayOf(day)] ?? 0
+    }
+
+    // Only the dates that depart from the pattern need looking at individually.
+    for (const dayIndex of this.overridesBetween(fromDay, toDay)) {
+      total -= this.weekdayMinutes[weekdayOf(dayIndex)] ?? 0
+      total += this.overrideMinutes.get(dayIndex) ?? 0
+    }
+    return total
+  }
+
+  /** Whole days with any work at all, `fromDay` to `toDay` inclusive. */
+  private patternDays(fromDay: number, toDay: number): number {
+    if (toDay < fromDay) return 0
+
+    const days = toDay - fromDay + 1
+    const weeks = Math.floor(days / 7)
+    let total = weeks * this.workingDaysPerWeek
+
+    for (let day = fromDay + weeks * 7; day <= toDay; day++) {
+      if (this.weekdayIsWorking[weekdayOf(day)] === true) total += 1
+    }
+
+    for (const dayIndex of this.overridesBetween(fromDay, toDay)) {
+      if (this.weekdayIsWorking[weekdayOf(dayIndex)] === true) total -= 1
+      if ((this.overrideMinutes.get(dayIndex) ?? 0) > 0) total += 1
+    }
+    return total
+  }
+
+  /** Overriding dates inside a range, found by binary search rather than by scanning. */
+  private overridesBetween(fromDay: number, toDay: number): number[] {
+    const days = this.overrideDays
+    if (days.length === 0) return []
+
+    let low = 0
+    let high = days.length
+    while (low < high) {
+      const mid = (low + high) >> 1
+      if (days[mid]! < fromDay) low = mid + 1
+      else high = mid
+    }
+
+    const found: number[] = []
+    for (let index = low; index < days.length && days[index]! <= toDay; index++) {
+      found.push(days[index]!)
+    }
+    return found
   }
 
   isWorkingTime(at: Date): boolean {
@@ -143,14 +246,26 @@ export class WorkingWeekCalendar implements Calendar {
     if (to.getTime() === from.getTime()) return 0
     if (to.getTime() < from.getTime()) return -this.workingHoursBetween(to, from)
 
-    let total = 0
+    const firstDay = this.dayIndexOf(from)
     const lastDay = this.dayIndexOf(to)
-    for (let day = this.dayIndexOf(from); day <= lastDay; day++) {
-      for (const span of this.spansForDay(day)) {
-        const start = Math.max(span.start, from.getTime())
-        const end = Math.min(span.end, to.getTime())
-        if (end > start) total += (end - start) / MS_PER_HOUR
-      }
+
+    if (firstDay === lastDay) {
+      return this.overlapMinutes(firstDay, from.getTime(), to.getTime()) / 60
+    }
+
+    let minutes = this.overlapMinutes(firstDay, from.getTime(), to.getTime())
+    minutes += this.patternMinutes(firstDay + 1, lastDay - 1)
+    minutes += this.overlapMinutes(lastDay, from.getTime(), to.getTime())
+    return minutes / 60
+  }
+
+  /** Working minutes of one day that fall inside an arbitrary instant range. */
+  private overlapMinutes(dayIndex: number, from: number, to: number): number {
+    let total = 0
+    for (const span of this.spansForDay(dayIndex)) {
+      const start = Math.max(span.start, from)
+      const end = Math.min(span.end, to)
+      if (end > start) total += (end - start) / MS_PER_MINUTE
     }
     return total
   }
@@ -164,21 +279,29 @@ export class WorkingWeekCalendar implements Calendar {
     if (to.getTime() === from.getTime()) return 0
     if (to.getTime() < from.getTime()) return -this.countWorkingDays(to, from)
 
-    let total = 0
+    const firstDay = this.dayIndexOf(from)
     const lastDay = this.dayIndexOf(to)
-    for (let day = this.dayIndexOf(from); day <= lastDay; day++) {
-      const spans = this.spansForDay(day)
-      let dayCapacity = 0
-      let dayWorked = 0
-      for (const span of spans) {
-        dayCapacity += span.end - span.start
-        const start = Math.max(span.start, from.getTime())
-        const end = Math.min(span.end, to.getTime())
-        if (end > start) dayWorked += end - start
-      }
-      if (dayCapacity > 0) total += dayWorked / dayCapacity
+
+    if (firstDay === lastDay) return this.partialDay(firstDay, from.getTime(), to.getTime())
+
+    return (
+      this.partialDay(firstDay, from.getTime(), to.getTime()) +
+      this.patternDays(firstDay + 1, lastDay - 1) +
+      this.partialDay(lastDay, from.getTime(), to.getTime())
+    )
+  }
+
+  /** How much of one day's capacity falls inside a range, as a fraction of that day. */
+  private partialDay(dayIndex: number, from: number, to: number): number {
+    let capacity = 0
+    let worked = 0
+    for (const span of this.spansForDay(dayIndex)) {
+      capacity += span.end - span.start
+      const start = Math.max(span.start, from)
+      const end = Math.min(span.end, to)
+      if (end > start) worked += end - start
     }
-    return total
+    return capacity > 0 ? worked / capacity : 0
   }
 
   /** First working moment at or after `at`. Use for start instants. */
@@ -293,8 +416,7 @@ export class WorkingWeekCalendar implements Calendar {
     const exception = this.exceptions.get(key)
     if (exception !== undefined) return exception
     if (this.holidays.has(key)) return []
-    const weekday = new Date(dayIndex * MS_PER_DAY).getUTCDay() as Weekday
-    return this.week.get(weekday) ?? []
+    return this.week.get(weekdayOf(dayIndex) as Weekday) ?? []
   }
 }
 
@@ -341,4 +463,18 @@ function assertDateKey(value: string): string {
 
 function dateKeyOf(dayIndex: number): string {
   return new Date(dayIndex * MS_PER_DAY).toISOString().slice(0, 10)
+}
+
+function dayIndexOfKey(key: string): number {
+  const [year, month, day] = key.split('-').map(Number) as [number, number, number]
+  return Date.UTC(year, month - 1, day) / MS_PER_DAY
+}
+
+/**
+ * Weekday for a day index, without allocating a Date.
+ *
+ * Day 0 is 1 January 1970, a Thursday, hence the offset of 4.
+ */
+function weekdayOf(dayIndex: number): number {
+  return (((dayIndex + 4) % 7) + 7) % 7
 }

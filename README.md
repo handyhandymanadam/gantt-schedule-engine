@@ -5,9 +5,12 @@ A headless project-scheduling engine, MIT licensed.
 Critical path, cascading auto-scheduling, working calendars, resource-conflict flagging, and
 earned value — the capabilities every comparable library puts behind a paid tier.
 
-> **Status: v1 engine feature-complete, pre-release.** All of the scope below is implemented and
-> tested, but the engine has not yet been validated against real production schedules and the API
-> may still change. Not published to npm. Read it, clone it, but do not depend on it yet.
+> **Status: 0.x.** All of the scope below is implemented and covered by tests, but nothing here
+> has yet been proven against real production schedules, so the API may still change between
+> minor versions.
+>
+> `gantt-schedule-engine` is published to npm. `gantt-schedule-ui` is not yet published — it
+> works, but it is still being refined; build it from this repository if you want it now.
 
 ## Why this exists
 
@@ -51,7 +54,7 @@ coexist on one schedule: framing is effort-driven, concrete curing is not.
 | Package | Purpose |
 |---|---|
 | `packages/engine` | The scheduling engine. Framework-agnostic, no dependencies. |
-| `packages/gantt-ui` | Gantt renderer consuming the engine. Vanilla DOM, neutral default styling, themed by CSS custom properties. |
+| `packages/gantt-ui` | Gantt renderer consuming the engine (not yet published). Vanilla DOM, neutral default styling, themed by CSS custom properties. |
 
 ## Scope
 

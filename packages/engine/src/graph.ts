@@ -69,44 +69,70 @@ export function topologicalSort(ids: readonly string[], edges: readonly Edge[]):
 
 /**
  * Depth-first search over the unresolved subgraph, collecting one representative path per cycle.
+ *
  * Deliberately not an exhaustive enumeration of elementary cycles, which is exponential; one
  * concrete example per cycle is what an error message actually needs.
+ *
+ * Iterative rather than recursive. A recursive walk is shorter to read, but its depth is the
+ * length of the chain, and a library that throws RangeError on a large cyclic graph has replaced
+ * a clear diagnostic with an obscure crash - in the exact case where the user most needs telling
+ * what is wrong.
  */
 function findCycles(unresolved: readonly string[], successors: Map<string, string[]>): string[][] {
   const candidates = new Set(unresolved)
   const state = new Map<string, 'visiting' | 'done'>()
-  const stack: string[] = []
   const cycles: string[][] = []
   const seen = new Set<string>()
 
-  const visit = (id: string): void => {
-    state.set(id, 'visiting')
-    stack.push(id)
+  interface Frame {
+    id: string
+    next: number
+  }
 
-    for (const next of successors.get(id) ?? []) {
-      if (!candidates.has(next)) continue
-      const nextState = state.get(next)
-      if (nextState === 'visiting') {
-        const at = stack.indexOf(next)
+  for (const root of unresolved) {
+    if (state.get(root) !== undefined) continue
+
+    const stack: Frame[] = [{ id: root, next: 0 }]
+    const path: string[] = [root]
+    const onPath = new Set<string>([root])
+    state.set(root, 'visiting')
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!
+      const children = successors.get(frame.id) ?? []
+
+      if (frame.next >= children.length) {
+        state.set(frame.id, 'done')
+        onPath.delete(frame.id)
+        path.pop()
+        stack.pop()
+        continue
+      }
+
+      const child = children[frame.next]!
+      frame.next += 1
+      if (!candidates.has(child)) continue
+
+      if (onPath.has(child)) {
+        const at = path.indexOf(child)
         if (at !== -1) {
-          const cycle = [...stack.slice(at), next]
+          const cycle = [...path.slice(at), child]
           const key = canonicalKey(cycle)
           if (!seen.has(key)) {
             seen.add(key)
             cycles.push(cycle)
           }
         }
-      } else if (nextState === undefined) {
-        visit(next)
+        continue
+      }
+
+      if (state.get(child) === undefined) {
+        state.set(child, 'visiting')
+        onPath.add(child)
+        path.push(child)
+        stack.push({ id: child, next: 0 })
       }
     }
-
-    stack.pop()
-    state.set(id, 'done')
-  }
-
-  for (const id of unresolved) {
-    if (state.get(id) === undefined) visit(id)
   }
 
   return cycles

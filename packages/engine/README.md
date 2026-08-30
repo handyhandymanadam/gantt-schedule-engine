@@ -6,9 +6,9 @@ paid tier.
 
 **Zero runtime dependencies.** No DOM, no framework, no fetching.
 
-> **Status: v1 feature-complete, pre-release.** Everything below is implemented and tested, but
-> the engine has not yet been validated against real production schedules and the API may still
-> change. Read it, clone it, but do not depend on it yet.
+> **Status: 0.x.** Everything below is implemented and covered by tests, but the engine has not
+> yet been proven against real production schedules, so the API may still change between minor
+> versions. Pin an exact version if that matters to you.
 
 ## Install
 

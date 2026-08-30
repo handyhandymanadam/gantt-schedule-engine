@@ -1,6 +1,6 @@
 {
   "name": "gantt-schedule-engine",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Headless project-scheduling engine: critical path, cascading auto-scheduling, working calendars, resource conflict flagging, and earned value. No DOM, no framework, no paywall.",
   "license": "MIT",
   "author": "handyhandymanadam <handyhandyman.adam@gmail.com>",
@@ -44,6 +44,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "prepublishOnly": "npm run build"
   }
 }

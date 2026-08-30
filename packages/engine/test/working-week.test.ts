@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { ContinuousCalendar } from '../src/calendar.js'
 import { WorkingWeekCalendar, type Shift } from '../src/working-week.js'
+import { offsetForZone } from '../src/timezone.js'
 import { calculateCriticalPath } from '../src/critical-path.js'
 import type { Link, Task } from '../src/types.js'
 
@@ -357,6 +358,107 @@ describe('WorkingWeekCalendar: properties', () => {
         const to = new Date(from.getTime() + elapsedHours * 3_600_000)
         expect(weekdays.workingHoursBetween(from, to)).toBeLessThanOrEqual(elapsedHours + 1e-9)
       }),
+    )
+  })
+})
+
+describe('WorkingWeekCalendar: bulk range arithmetic', () => {
+  /**
+   * Measuring a range sums whole weeks and then corrects for the handful of dates that depart
+   * from the pattern, rather than walking every day. That is a large speed difference over a
+   * multi-year span, so it needs proving exact rather than merely close.
+   */
+  const naiveHours = (calendar: WorkingWeekCalendar, from: Date, to: Date): number => {
+    let total = 0
+    const step = 60_000 // a minute: fine enough that shift boundaries land exactly on a step
+    for (let at = from.getTime(); at < to.getTime(); at += step) {
+      // Clamp the final step, or the reference overcounts whatever hangs past `to`.
+      const slice = Math.min(step, to.getTime() - at)
+      if (calendar.isWorkingTime(new Date(at))) total += slice / 3_600_000
+    }
+    return total
+  }
+
+  const awkward = new WorkingWeekCalendar({
+    week: {
+      1: [{ start: '07:00', end: '11:30' }, { start: '12:00', end: '15:30' }],
+      2: [{ start: '07:00', end: '15:00' }],
+      3: [{ start: '09:00', end: '17:00' }],
+      4: [{ start: '07:00', end: '11:30' }, { start: '12:00', end: '15:30' }],
+      5: [{ start: '07:00', end: '11:00' }],
+      6: [{ start: '08:00', end: '12:00' }], // a working Saturday in the pattern
+    },
+    holidays: ['2026-01-19', '2026-02-16', '2026-05-25', '2026-07-03', '2026-12-25'],
+    exceptions: {
+      '2026-03-14': [{ start: '08:00', end: '10:00' }],
+      '2026-11-26': [],
+    },
+  })
+
+  it('agrees with a step-by-step walk across a long span with holidays and exceptions', () => {
+    const from = new Date('2026-01-05T00:00:00Z')
+    const to = new Date('2026-12-31T00:00:00Z')
+    expect(awkward.workingHoursBetween(from, to)).toBeCloseTo(naiveHours(awkward, from, to), 6)
+  })
+
+  it('agrees on ranges that start and end mid-shift', () => {
+    const from = new Date('2026-03-11T09:45:00Z')
+    const to = new Date('2026-09-17T13:20:00Z')
+    expect(awkward.workingHoursBetween(from, to)).toBeCloseTo(naiveHours(awkward, from, to), 6)
+  })
+
+  it('agrees on a range wholly inside one day', () => {
+    const from = new Date('2026-03-16T08:00:00Z')
+    const to = new Date('2026-03-16T13:00:00Z')
+    expect(awkward.workingHoursBetween(from, to)).toBeCloseTo(naiveHours(awkward, from, to), 6)
+  })
+
+  it('agrees on a range that lands entirely on a holiday', () => {
+    const from = new Date('2026-05-25T00:00:00Z')
+    const to = new Date('2026-05-26T00:00:00Z')
+    expect(awkward.workingHoursBetween(from, to)).toBe(0)
+  })
+
+  it('counts working days across a long span, exceptions included', () => {
+    // 2026-11-26 is an exception with no shifts, so it must not count; 2026-03-14 is a Saturday
+    // exception with two hours, so it counts as a full working day.
+    const from = new Date('2026-11-23T00:00:00Z')
+    const to = new Date('2026-11-30T00:00:00Z')
+    // Mon Tue Wed Thu Fri Sat = 6 working days in the pattern, less the Thursday exception.
+    expect(awkward.countWorkingDays(from, to)).toBeCloseTo(5, 6)
+  })
+
+  it('stays exact under a daylight-saving resolver', () => {
+    const zoned = new WorkingWeekCalendar({ utcOffsetMinutes: offsetForZone('America/New_York') })
+    const from = new Date('2026-02-02T13:00:00Z')
+    const to = new Date('2026-06-01T12:00:00Z')
+    expect(zoned.workingHoursBetween(from, to)).toBeCloseTo(naiveHours(zoned, from, to), 6)
+  })
+
+  it('is additive: a long span equals the sum of its parts', () => {
+    // The real guarantee. Whole weeks are summed in bulk and exceptional dates corrected for, so
+    // measuring twenty years at once must give exactly what measuring it a year at a time does.
+    const from = new Date('2026-01-05T08:00:00Z')
+    const to = new Date('2046-01-05T08:00:00Z')
+
+    let pieces = 0
+    let cursor = from
+    while (cursor.getTime() < to.getTime()) {
+      const next = new Date(Math.min(cursor.getTime() + 365 * 86_400_000, to.getTime()))
+      pieces += awkward.workingHoursBetween(cursor, next)
+      cursor = next
+    }
+
+    expect(awkward.workingHoursBetween(from, to)).toBeCloseTo(pieces, 6)
+  })
+
+  it('is additive across an arbitrary split point', () => {
+    const from = new Date('2026-02-10T09:20:00Z')
+    const middle = new Date('2027-08-03T14:05:00Z')
+    const to = new Date('2029-11-19T10:40:00Z')
+    expect(awkward.workingHoursBetween(from, to)).toBeCloseTo(
+      awkward.workingHoursBetween(from, middle) + awkward.workingHoursBetween(middle, to),
+      6,
     )
   })
 })
