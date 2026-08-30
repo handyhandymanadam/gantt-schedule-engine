@@ -29,6 +29,16 @@ export type { Shift, Weekday, WorkingWeekOptions } from './working-week.js'
 export { topologicalSort } from './graph.js'
 export type { Edge, TopologicalResult } from './graph.js'
 
+export {
+  deriveDuration,
+  deriveEffort,
+  durationInDays,
+  reconcileTask,
+  snapHours,
+  withResourceCount,
+} from './effort.js'
+export type { Rounding, SnapOptions } from './effort.js'
+
 export { calculateCriticalPath, CyclicScheduleError } from './critical-path.js'
 export type {
   ConstraintViolation,
