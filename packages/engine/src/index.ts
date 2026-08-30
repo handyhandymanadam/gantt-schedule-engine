@@ -23,6 +23,9 @@ export type {
 export { ContinuousCalendar, continuousCalendar, MS_PER_HOUR } from './calendar.js'
 export type { Calendar } from './calendar.js'
 
+export { WorkingWeekCalendar } from './working-week.js'
+export type { Shift, Weekday, WorkingWeekOptions } from './working-week.js'
+
 export { topologicalSort } from './graph.js'
 export type { Edge, TopologicalResult } from './graph.js'
 

@@ -249,6 +249,12 @@ a resource roster it is coupled to a schema and stops being reusable.
 
 ## Deferred
 
+**Daylight saving.** `WorkingWeekCalendar` maps wall-clock shifts to instants through a fixed
+UTC offset, so a schedule spanning a DST transition drifts by an hour. Handling it properly means
+resolving the zone offset per instant rather than once per calendar. That is deferred rather than
+approximated, because a calendar that is subtly wrong twice a year is worse than one whose limits
+are stated.
+
 Additive later with no rework: time-cost tradeoff analysis (crashing — because `basis` is recorded
 per task, the engine can already identify which critical-path tasks are work-driven and therefore
 worth adding people to), SS/FF/SF link types, backward planning, the full constraint framework,
