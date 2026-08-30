@@ -111,6 +111,21 @@ moved subtree's boundary**, since a task dragged into another phase is usually b
 and its old links become both meaningless and visually chaotic. Links wholly inside the moved
 subtree travel with it. Set `breakLinksOnReparent: false` to keep everything.
 
+## Bar labels
+
+Off by default. The grid is frozen beside the timeline, so any bar you can see already has its
+name on the same row - a label on the bar repeats it, and pays for the repetition by colliding
+with the dependency arrows, which converge in exactly the space to a bar's right. At a fit zoom
+they overlap each other too.
+
+```ts
+createGantt(host, { tasks, calendar, barLabels: 'right' })  // 'none' | 'right' | 'inside'
+```
+
+`'inside'` clips to the bar with an ellipsis, so a short task shows what fits instead of spilling
+over its neighbours. Both are useful for a printed or exported chart with no grid alongside.
+Summary bars are never labelled, and every bar carries a name-and-dates tooltip regardless.
+
 ## What it draws
 
 Task bars with progress, phase summary bars, milestones as diamonds, dependency arrows, the

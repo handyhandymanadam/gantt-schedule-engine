@@ -136,6 +136,14 @@
       <span id="zoom-readout" class="readout"></span>
       <button id="critical" aria-pressed="true" type="button">Critical path</button>
       <button id="collapse" type="button">Collapse all</button>
+      <label>
+        Labels
+        <select id="labels">
+          <option value="none" selected>None</option>
+          <option value="right">Beside bar</option>
+          <option value="inside">In bar</option>
+        </select>
+      </label>
       <button id="theme" aria-pressed="false" type="button">Dusk theme</button>
       <button id="undo" type="button" disabled>Undo</button>
     </div>
@@ -417,6 +425,10 @@
         allCollapsed = !allCollapsed
         for (const phase of PHASES) chart.toggle(phase)
         event.target.textContent = allCollapsed ? 'Expand all' : 'Collapse all'
+      })
+
+      document.getElementById('labels').addEventListener('change', (event) => {
+        chart.update({ barLabels: event.target.value })
       })
 
       const themeButton = document.getElementById('theme')

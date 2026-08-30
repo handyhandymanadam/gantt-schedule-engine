@@ -1033,3 +1033,56 @@ describe('resizing a bar', () => {
     expect(barFor('a').style.left).toBe(before)
   })
 })
+
+describe('bar labels', () => {
+  const labelled = {
+    tasks: [
+      task('a', 24, { schedulingMode: 'manual' }),
+      task('phase', 0),
+      task('kid', 24, { parentId: 'phase', schedulingMode: 'manual' }),
+      task('mark', 0, { schedulingMode: 'manual' }),
+    ],
+    calendar,
+    labelOf: (entry: Task) => `Name of ${entry.id}`,
+  }
+
+  it('draws none by default', () => {
+    // The frozen grid already shows every visible bar's name on the same row, so a label on the
+    // bar repeats it and collides with the arrows converging beside it.
+    createGantt(host, labelled)
+    expect(host.querySelectorAll('.gantt-bar-label')).toHaveLength(0)
+  })
+
+  it('still names the task in the grid and in a tooltip', () => {
+    createGantt(host, labelled)
+    expect(host.querySelector('.gantt-row-name')!.textContent).toBe('Name of a')
+    expect(barFor('a').title).toContain('Name of a')
+  })
+
+  it('places labels beside the bars when asked', () => {
+    const chart = createGantt(host, labelled)
+    chart.update({ barLabels: 'right' })
+    expect(barFor('a').querySelector('.gantt-bar-label-right')!.textContent).toBe('Name of a')
+  })
+
+  it('places labels inside the bars when asked', () => {
+    const chart = createGantt(host, labelled)
+    chart.update({ barLabels: 'inside' })
+    expect(barFor('a').querySelector('.gantt-bar-label-inside')!.textContent).toBe('Name of a')
+  })
+
+  it('never labels a summary bar, which has no work of its own', () => {
+    const chart = createGantt(host, labelled)
+    chart.update({ barLabels: 'right' })
+    expect(barFor('phase').querySelector('.gantt-bar-label')).toBeNull()
+    expect(barFor('kid').querySelector('.gantt-bar-label')).not.toBeNull()
+  })
+
+  it('turns back off', () => {
+    const chart = createGantt(host, labelled)
+    chart.update({ barLabels: 'right' })
+    expect(host.querySelectorAll('.gantt-bar-label').length).toBeGreaterThan(0)
+    chart.update({ barLabels: 'none' })
+    expect(host.querySelectorAll('.gantt-bar-label')).toHaveLength(0)
+  })
+})

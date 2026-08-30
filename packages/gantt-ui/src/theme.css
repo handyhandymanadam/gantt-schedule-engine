@@ -291,13 +291,28 @@
 .gantt-bar-label {
   position: absolute;
   top: 0;
-  left: calc(100% + 6px);
   height: 100%;
   display: flex;
   align-items: center;
-  color: var(--gantt-text);
   white-space: nowrap;
   pointer-events: none;
+}
+
+.gantt-bar-label-right {
+  left: calc(100% + 6px);
+  color: var(--gantt-text);
+}
+
+/* Clipped to the bar, so a short task shows what fits rather than spilling over its neighbours. */
+.gantt-bar-label-inside {
+  left: 0;
+  right: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  line-height: var(--gantt-bar-height);
+  color: var(--gantt-bar-text);
 }
 
 /* A summary bar reads as a bracket over its children rather than as work of its own. */
@@ -316,9 +331,13 @@
   transform: rotate(45deg);
 }
 
-.gantt-bar[data-kind='milestone'] .gantt-bar-label {
+.gantt-bar[data-kind='milestone'] .gantt-bar-label-right {
   transform: rotate(-45deg);
   left: calc(100% + 2px);
+}
+
+.gantt-bar[data-kind='milestone'] .gantt-bar-label-inside {
+  display: none;
 }
 
 /* ---- Link editing ---- */

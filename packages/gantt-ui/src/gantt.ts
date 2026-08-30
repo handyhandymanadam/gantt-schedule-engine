@@ -75,6 +75,20 @@ export interface GanttOptions {
   resizableBars?: boolean
 
   /**
+   * Where a task's name appears on the chart itself. Defaults to `'none'`.
+   *
+   * The grid is frozen beside the timeline, so any bar you can see already has its name on the
+   * same row: a label on the bar repeats it, and pays for the repetition by colliding with the
+   * dependency arrows, which converge in exactly the space to the right of a bar. At a fit zoom
+   * the labels overlap each other as well.
+   *
+   * `'right'` restores the label beside the bar, and `'inside'` puts it within the bar and clips
+   * it - both useful for a printed or exported chart with no grid alongside. Every bar carries a
+   * name-and-dates tooltip regardless.
+   */
+  barLabels?: 'none' | 'right' | 'inside'
+
+  /**
    * Set to allow dependencies to be drawn between bars and removed with Delete. Off by default,
    * so a read-only chart stays read-only.
    */
@@ -630,9 +644,12 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       bar.append(progress)
     }
 
-    const label = element('span', 'gantt-bar-label')
-    label.textContent = labelFor(row.task)
-    bar.append(label)
+    const placement = opts.barLabels ?? 'none'
+    if (placement !== 'none' && kind !== 'summary') {
+      const label = element('span', `gantt-bar-label gantt-bar-label-${placement}`)
+      label.textContent = labelFor(row.task)
+      bar.append(label)
+    }
 
     bar.title = `${labelFor(row.task)}\n${formatDate(extent.start)} to ${formatDate(extent.finish)}`
 
