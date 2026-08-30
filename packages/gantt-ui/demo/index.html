@@ -48,6 +48,14 @@
         overflow: hidden;
         box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
       }
+      .readout {
+        min-width: 82px;
+        color: #5b6472;
+        font-variant-numeric: tabular-nums;
+      }
+      #zoom-slider {
+        width: 130px;
+      }
       #log {
         margin-top: 14px;
         padding: 10px 12px;
@@ -88,19 +96,29 @@
       <strong>Drag a bar</strong> to move a task. <strong>Hover a bar</strong> for its connector
       handles and drag one onto another bar to add a dependency. <strong>Right-click an
       arrow</strong> to remove it. <strong>Drag a row</strong> in the left-hand list to reorder it,
-      or onto a phase to move it there. The engine only ever proposes; this page applies what it
-      proposes, which is why Undo is one line.
+      or onto a phase to move it there. Zoom with the slider, or hold <kbd>Ctrl</kbd> and scroll
+      over the chart. The engine only ever proposes; this page applies what it proposes, which is
+      why Undo is one line.
     </p>
 
     <div class="toolbar">
       <label>
         Zoom
         <select id="zoom">
+          <option value="fit">Fit all</option>
+          <option value="fit-critical">Fit critical path</option>
           <option value="day">Day</option>
           <option value="week" selected>Week</option>
           <option value="month">Month</option>
+          <option value="quarter">Quarter</option>
+          <option value="year">Year</option>
         </select>
       </label>
+      <button id="zoom-out" type="button" title="Zoom out">&minus;</button>
+      <input id="zoom-slider" type="range" min="-2.3" max="2.6" step="0.01" value="1.41"
+             aria-label="Zoom" />
+      <button id="zoom-in" type="button" title="Zoom in">+</button>
+      <span id="zoom-readout" class="readout"></span>
       <button id="critical" aria-pressed="true" type="button">Critical path</button>
       <button id="collapse" type="button">Collapse all</button>
       <button id="theme" aria-pressed="false" type="button">Dusk theme</button>
@@ -137,6 +155,8 @@
 
       const initial = buildSchedule()
       const { links, labels } = initial
+      const slider = document.getElementById('zoom-slider')
+      const readout = document.getElementById('zoom-readout')
       let tasks = initial.tasks
       let currentLinks = links
       const history = []
@@ -165,6 +185,7 @@
         statusDate: new Date('2026-05-01T11:00:00Z'),
         zoom: 'week',
         labelOf: (task) => labels.get(task.id) ?? task.id,
+        onZoom: () => showScale(),
         onLinksChange: ({ links: nextLinks, schedule, added, removed }) => {
           history.push({ tasks, links: currentLinks })
           tasks = schedule.tasks
@@ -222,9 +243,37 @@
         log.textContent = 'Reverted.'
       })
 
-      document.getElementById('zoom').addEventListener('change', (event) => {
+      // Declared before createGantt so onZoom can call it during the first render.
+      function showScale() {
+        const px = chart.pixelsPerDay
+        readout.textContent =
+          px >= 4 ? `${px.toFixed(px < 20 ? 1 : 0)} px/day` : `${(px * 7).toFixed(1)} px/week`
+        slider.value = String(Math.log10(px))
+      }
+
+      const zoomSelect = document.getElementById('zoom')
+      // The slider is logarithmic: a linear one spends most of its travel in scales nobody wants.
+      const fromSlider = (value) => 10 ** Number(value)
+
+      zoomSelect.addEventListener('change', (event) => {
         chart.setZoom(event.target.value)
+        showScale()
       })
+
+      slider.addEventListener('input', () => {
+        chart.setZoom(fromSlider(slider.value))
+        showScale()
+      })
+
+      const step = (factor) => () => {
+        chart.zoomBy(factor)
+        zoomSelect.value = ''
+        showScale()
+      }
+      document.getElementById('zoom-in').addEventListener('click', step(1.3))
+      document.getElementById('zoom-out').addEventListener('click', step(1 / 1.3))
+
+      showScale()
 
       const criticalButton = document.getElementById('critical')
       criticalButton.addEventListener('click', () => {

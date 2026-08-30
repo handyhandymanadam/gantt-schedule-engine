@@ -86,6 +86,27 @@ from the engine. Dragging a bar produces an engine *proposal* rather than a muta
 hands `onChange` the full set of downstream changes and the application decides whether they
 happen. That is the engine's contract, carried up to the UI.
 
+## Zoom
+
+Scale is continuous. `zoom` takes a preset, a literal pixels-per-day, or a fit mode:
+
+```ts
+chart.setZoom('week')       // day | week | month | quarter | year
+chart.setZoom(18)           // pixels per day, clamped to a usable range
+chart.zoomToFit()           // the whole schedule in the visible width
+chart.zoomToCriticalPath()  // the critical chain, scrolled into view
+chart.zoomBy(1.3, clientX)  // scale about a point, holding it still
+chart.pixelsPerDay          // the scale in use, however it was arrived at
+```
+
+Ctrl or Cmd with the wheel zooms about the cursor; a plain wheel scrolls as usual.
+
+Fit modes are resolved at render time against the current width and re-resolve on resize, so they
+stay correct rather than freezing at whatever the container was when chosen. Header granularity
+follows the resolved scale, not the setting, so a numeric zoom gets the right ticks. `onZoom`
+reports the scale whenever it changes, including from a wheel gesture, so host controls can stay
+in step.
+
 ## Sizing
 
 The chart fills its container and scrolls inside it, so **give the container a height**:

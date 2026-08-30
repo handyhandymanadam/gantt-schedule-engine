@@ -356,6 +356,92 @@ describe('dragging', () => {
 })
 
 describe('zoom', () => {
+  const long = {
+    tasks: Array.from({ length: 12 }, (_, index) =>
+      task(`t${index}`, 24, { schedulingMode: 'manual', start: h(index * 48) }),
+    ),
+    calendar,
+  }
+
+  it('accepts a literal scale', () => {
+    const chart = createGantt(host, { ...long, zoom: 12 })
+    expect(chart.pixelsPerDay).toBe(12)
+    chart.setZoom(48)
+    expect(chart.pixelsPerDay).toBe(48)
+  })
+
+  it('clamps a scale that would be unusable', () => {
+    const chart = createGantt(host, { ...long, zoom: 100_000 })
+    expect(chart.pixelsPerDay).toBeLessThanOrEqual(400)
+    chart.setZoom(0.0001)
+    expect(chart.pixelsPerDay).toBeGreaterThanOrEqual(0.2)
+  })
+
+  it('multiplies the current scale', () => {
+    const chart = createGantt(host, { ...long, zoom: 20 })
+    chart.zoomBy(2)
+    expect(chart.pixelsPerDay).toBe(40)
+    chart.zoomBy(0.5)
+    expect(chart.pixelsPerDay).toBe(20)
+  })
+
+  it('fits the schedule to the available width', () => {
+    const chart = createGantt(host, { ...long, zoom: 'fit' })
+    const body = host.querySelector<HTMLElement>('.gantt-body')!
+    // Everything is inside one screen, rather than requiring a horizontal scroll.
+    expect(parseFloat(body.style.width)).toBeLessThanOrEqual(Math.max(240, 120) + 1)
+    expect(chart.pixelsPerDay).toBeLessThan(20)
+  })
+
+  it('reports the scale whenever it changes', () => {
+    const onZoom = vi.fn()
+    const chart = createGantt(host, { ...long, zoom: 20, onZoom })
+    onZoom.mockClear()
+    chart.setZoom(40)
+    expect(onZoom).toHaveBeenCalledWith(40)
+    // Setting the same scale again is not a change.
+    onZoom.mockClear()
+    chart.setZoom(40)
+    expect(onZoom).not.toHaveBeenCalled()
+  })
+
+  it('zooms on ctrl-wheel and leaves a plain wheel to scroll', () => {
+    const chart = createGantt(host, { ...long, zoom: 20 })
+    const timeline = host.querySelector<HTMLElement>('.gantt-timeline')!
+
+    const zoomWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, ctrlKey: true })
+    timeline.dispatchEvent(zoomWheel)
+    expect(zoomWheel.defaultPrevented).toBe(true)
+    expect(chart.pixelsPerDay).toBeGreaterThan(20)
+
+    const scale = chart.pixelsPerDay
+    const plainWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100 })
+    timeline.dispatchEvent(plainWheel)
+    expect(plainWheel.defaultPrevented).toBe(false)
+    expect(chart.pixelsPerDay).toBe(scale)
+  })
+
+  it('chooses header granularity from the scale, not the setting', () => {
+    // A numeric or fit zoom has no preset name; keying off the setting sent every such scale to
+    // the coarsest branch, so a week-scale chart drew month headers.
+    const chart = createGantt(host, { ...long, zoom: 90 })
+    const minor = (): string[] =>
+      [...host.querySelectorAll('.gantt-tier:not(.gantt-tier-major) .gantt-tick')].map(
+        (node) => node.textContent ?? '',
+      )
+
+    expect(minor()[0]).toMatch(/^\d+$/) // day numbers
+
+    chart.setZoom(26) // week scale, set as a number rather than the preset
+    expect(minor()[0]).toMatch(/\d+ \w{3}/) // "2 Mar"
+
+    chart.setZoom(7)
+    expect(minor()[0]).toMatch(/^\w{3}$/) // "Mar"
+
+    chart.setZoom(0.7)
+    expect(minor()[0]).toMatch(/^Q\d$/) // quarters
+  })
+
   it('widens the timeline as the zoom tightens', () => {
     const chart = createGantt(host, {
       tasks: [task('a', 240, { schedulingMode: 'manual' })],

@@ -25,7 +25,13 @@ import {
  * That is the same contract the engine keeps, carried up to the UI.
  */
 
-export type Zoom = 'day' | 'week' | 'month'
+/**
+ * Either a named preset, a literal number of pixels per day, or a mode that computes one.
+ *
+ * `'fit'` and `'fit-critical'` are resolved at render time against the current width, so they
+ * stay correct when the container resizes rather than freezing at whatever it was.
+ */
+export type Zoom = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'fit' | 'fit-critical' | number
 
 export interface GanttOptions {
   tasks: readonly Task[]
@@ -44,6 +50,9 @@ export interface GanttOptions {
    */
   onChange?: (result: AutoScheduleResult) => void
   onSelect?: (taskId: string | null) => void
+
+  /** Called whenever the scale changes, including from a fit mode or a wheel gesture. */
+  onZoom?: (pixelsPerDay: number) => void
 
   /**
    * Set to allow dependencies to be drawn between bars and removed with Delete. Off by default,
@@ -117,7 +126,19 @@ export interface LinkRejection {
 
 export interface GanttInstance {
   update(options: Partial<GanttOptions>): void
+  /** A preset, a literal pixels-per-day, or a fit mode. */
   setZoom(zoom: Zoom): void
+  /** Scale so the whole schedule fits the visible width. */
+  zoomToFit(): void
+  /** Scale so the critical chain fits, and scroll to it. */
+  zoomToCriticalPath(): void
+  /**
+   * Multiply the current scale, keeping the instant under `anchorClientX` in place. Without an
+   * anchor the centre of the view is held.
+   */
+  zoomBy(factor: number, anchorClientX?: number): void
+  /** The scale currently in use, whether set literally or computed by a fit mode. */
+  readonly pixelsPerDay: number
   toggle(taskId: string): void
   select(taskId: string | null): void
   /** Select a dependency, so Delete removes it. */
@@ -133,7 +154,11 @@ export interface GanttInstance {
 
 const MS_PER_DAY = 86_400_000
 
-const PIXELS_PER_DAY: Record<Zoom, number> = { day: 90, week: 26, month: 7 }
+const PRESETS = { day: 90, week: 26, month: 7, quarter: 2.4, year: 0.7 } as const
+
+/** Below this a bar is a smear; above it a day is wider than most screens. */
+const MIN_PIXELS_PER_DAY = 0.2
+const MAX_PIXELS_PER_DAY = 400
 
 interface Row {
   task: Task
@@ -253,6 +278,26 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   root.addEventListener('keydown', onKeyDown)
 
   let disposeDrag: (() => void) | null = null
+  let lastScale: number = PRESETS.week
+
+  // Ctrl/Cmd + wheel is the standard gesture for scaling a canvas, and it is what a trackpad
+  // pinch reports. Without the modifier the wheel keeps its ordinary scrolling job.
+  const onWheel = (event: WheelEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    instance.zoomBy(event.deltaY < 0 ? 1.15 : 1 / 1.15, event.clientX)
+  }
+  timeline.addEventListener('wheel', onWheel, { passive: false })
+
+  // A fit mode is relative to the container, so it has to be recomputed when that changes.
+  const observer =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          const setting = opts.zoom
+          if (setting === 'fit' || setting === 'fit-critical') render()
+        })
+  observer?.observe(timeline)
 
   function render(): void {
     const tasks = opts.tasks
@@ -281,14 +326,21 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
     const critical = new Set(cpm?.criticalPath ?? [])
     const range = timeRange([...extents.values()])
-    const pxPerDay = PIXELS_PER_DAY[opts.zoom ?? 'week']
+
+    const criticalExtents = [...extents.entries()]
+      .filter(([id]) => critical.has(id))
+      .map(([, extent]) => extent)
+    const pxPerDay = resolveScale(range, criticalExtents)
+    const scaleChanged = pxPerDay !== lastScale
+    lastScale = pxPerDay
+
     const width = Math.max(240, ((range.to - range.from) / MS_PER_DAY) * pxPerDay)
     const rowHeight = readRowHeight(root)
 
     root.dataset['reorderable'] = String(opts.reorderable === true)
 
     renderGrid(rows)
-    renderHeader(range, pxPerDay, width, opts.zoom ?? 'week')
+    renderHeader(range, pxPerDay, width, tickScaleFor(pxPerDay))
     renderBody({
       rows,
       extents,
@@ -301,6 +353,8 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       rowHeight,
       parentRollups: cpm?.parents ?? [],
     })
+
+    if (scaleChanged) opts.onZoom?.(pxPerDay)
   }
 
   function renderGrid(rows: readonly Row[]): void {
@@ -354,7 +408,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     range: { from: number; to: number },
     pxPerDay: number,
     width: number,
-    zoom: Zoom,
+    zoom: TickScale,
   ): void {
     timelineHeader.replaceChildren()
     timelineHeader.style.width = `${width}px`
@@ -402,7 +456,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       body.append(band)
     }
 
-    for (const tick of minorTicks(range, opts.zoom ?? 'week')) {
+    for (const tick of minorTicks(range, tickScaleFor(pxPerDay))) {
       const line = element('div', 'gantt-gridline')
       line.style.left = `${((tick.at - range.from) / MS_PER_DAY) * pxPerDay}px`
       body.append(line)
@@ -568,7 +622,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       event.preventDefault()
       instance.select(task.id)
 
-      const pxPerDay = PIXELS_PER_DAY[opts.zoom ?? 'week']
+      const pxPerDay = lastScale
       const originX = event.clientX
       const originLeft = parseFloat(bar.style.left || '0')
       bar.dataset['dragging'] = 'true'
@@ -995,6 +1049,39 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     )
   }
 
+  /**
+   * Pixels per day for the current zoom setting.
+   *
+   * Fit modes are resolved here rather than stored, so they follow the container instead of
+   * freezing at whatever width it happened to have when the mode was chosen.
+   */
+  function resolveScale(range: { from: number; to: number }, criticalExtents: Extent[]): number {
+    const setting = opts.zoom ?? 'week'
+
+    if (typeof setting === 'number') return clampScale(setting)
+    if (setting !== 'fit' && setting !== 'fit-critical') return PRESETS[setting]
+
+    const available = Math.max(120, timeline.clientWidth - 24)
+
+    if (setting === 'fit-critical' && criticalExtents.length > 0) {
+      const span = spanOf(criticalExtents)
+      const days = Math.max(1, (span.to - span.from) / MS_PER_DAY)
+      return clampScale(available / days)
+    }
+
+    const days = Math.max(1, (range.to - range.from) / MS_PER_DAY)
+    return clampScale(available / days)
+  }
+
+  /** After a fit-critical render, bring the critical chain into view. */
+  function scrollToCritical(): void {
+    const setting = opts.zoom
+    if (setting !== 'fit-critical') return
+    const first = body.querySelector<HTMLElement>('.gantt-bar[data-critical="true"]')
+    if (first === null) return
+    timeline.scrollLeft = Math.max(0, first.offsetLeft - 12)
+  }
+
   function labelFor(task: Task): string {
     return opts.labelOf?.(task) ?? task.id
   }
@@ -1024,6 +1111,29 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     setZoom(zoom) {
       opts = { ...opts, zoom }
       render()
+      scrollToCritical()
+    },
+    zoomToFit() {
+      instance.setZoom('fit')
+    },
+    zoomToCriticalPath() {
+      instance.setZoom('fit-critical')
+    },
+    zoomBy(factor, anchorClientX) {
+      const box = timeline.getBoundingClientRect()
+      const anchorX =
+        anchorClientX === undefined ? timeline.clientWidth / 2 : anchorClientX - box.left
+      // Hold the instant under the anchor still, so zooming does not throw away your place.
+      const offsetBefore = timeline.scrollLeft + anchorX
+      const next = clampScale(lastScale * factor)
+      const ratio = next / lastScale
+
+      opts = { ...opts, zoom: next }
+      render()
+      timeline.scrollLeft = Math.max(0, offsetBefore * ratio - anchorX)
+    },
+    get pixelsPerDay() {
+      return lastScale
     },
     toggle(taskId) {
       if (collapsed.has(taskId)) collapsed.delete(taskId)
@@ -1068,6 +1178,8 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       disposeDrag?.()
       timeline.removeEventListener('scroll', syncScroll)
       timeline.removeEventListener('scroll', closeMenu)
+      timeline.removeEventListener('wheel', onWheel)
+      observer?.disconnect()
       document.removeEventListener('pointerdown', onDocumentPointerDown, true)
       root.removeEventListener('keydown', onKeyDown)
       root.remove()
@@ -1116,6 +1228,16 @@ function buildRows(
   return rows
 }
 
+const clampScale = (value: number): number =>
+  Math.min(MAX_PIXELS_PER_DAY, Math.max(MIN_PIXELS_PER_DAY, value))
+
+function spanOf(extents: readonly Extent[]): { from: number; to: number } {
+  return {
+    from: Math.min(...extents.map((extent) => extent.start.getTime())),
+    to: Math.max(...extents.map((extent) => extent.finish.getTime())),
+  }
+}
+
 function timeRange(extents: readonly Extent[]): { from: number; to: number } {
   if (extents.length === 0) {
     const now = Date.UTC(2026, 0, 1)
@@ -1136,7 +1258,22 @@ interface Tick {
   width: number
 }
 
-function minorTicks(range: { from: number; to: number }, zoom: Zoom): Tick[] {
+/**
+ * Header granularity for a scale.
+ *
+ * Driven by pixels per day rather than by the zoom setting: a numeric or fit zoom has no preset
+ * name, and keying off the setting made every such scale fall through to the coarsest branch.
+ */
+function tickScaleFor(pixelsPerDay: number): 'day' | 'week' | 'month' | 'year' {
+  if (pixelsPerDay >= 34) return 'day'
+  if (pixelsPerDay >= 11) return 'week'
+  if (pixelsPerDay >= 1.6) return 'month'
+  return 'year'
+}
+
+type TickScale = ReturnType<typeof tickScaleFor>
+
+function minorTicks(range: { from: number; to: number }, zoom: TickScale): Tick[] {
   const ticks: Tick[] = []
   if (zoom === 'day') {
     for (let at = range.from; at < range.to; at += MS_PER_DAY) {
@@ -1151,14 +1288,25 @@ function minorTicks(range: { from: number; to: number }, zoom: Zoom): Tick[] {
     }
     return ticks
   }
-  for (let at = startOfMonth(range.from); at < range.to; at = addMonths(at, 1)) {
-    ticks.push({ at, label: monthName(new Date(at)), width: addMonths(at, 1) - at })
+  if (zoom === 'month') {
+    for (let at = startOfMonth(range.from); at < range.to; at = addMonths(at, 1)) {
+      ticks.push({ at, label: monthName(new Date(at)), width: addMonths(at, 1) - at })
+    }
+    return ticks
+  }
+  for (let at = startOfMonth(range.from); at < range.to; at = addMonths(at, 3)) {
+    const date = new Date(at)
+    ticks.push({
+      at,
+      label: `Q${Math.floor(date.getUTCMonth() / 3) + 1}`,
+      width: addMonths(at, 3) - at,
+    })
   }
   return ticks
 }
 
-function majorTicks(range: { from: number; to: number }, zoom: Zoom): Tick[] {
-  if (zoom === 'month') {
+function majorTicks(range: { from: number; to: number }, zoom: TickScale): Tick[] {
+  if (zoom === 'month' || zoom === 'year') {
     const ticks: Tick[] = []
     for (let at = startOfYear(range.from); at < range.to; at = addMonths(at, 12)) {
       ticks.push({ at, label: String(new Date(at).getUTCFullYear()), width: addMonths(at, 12) - at })
