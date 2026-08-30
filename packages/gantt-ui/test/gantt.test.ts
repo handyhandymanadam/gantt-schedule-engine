@@ -255,6 +255,47 @@ describe('dragging', () => {
     expect(onChange).toHaveBeenCalled()
   })
 
+  it('keeps the grabbed bar in the document', () => {
+    // Selecting used to re-render, which replaced every bar mid-gesture. The drag then moved an
+    // orphaned node while the visible chart sat still, so the chart looked frozen.
+    createGantt(host, { ...schedule, zoom: 'day' })
+    const bar = barFor('a')
+    bar.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 0, button: 0 }),
+    )
+    expect(document.contains(bar)).toBe(true)
+    expect(barFor('a')).toBe(bar)
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 0, button: 0 }))
+  })
+
+  it('selects without rebuilding the chart', () => {
+    const chart = createGantt(host, { ...schedule, zoom: 'day' })
+    const bar = barFor('b')
+    chart.select('b')
+    expect(barFor('b')).toBe(bar)
+    expect(bar.dataset['selected']).toBe('true')
+    chart.select('a')
+    expect(bar.dataset['selected']).toBe('false')
+  })
+
+  it('offsets from where the bar is drawn, not from its stored start', () => {
+    // 'b' is auto-scheduled, so the engine draws it after 'a' regardless of the stale date it
+    // was authored with. Offsetting from the stored value would teleport it.
+    const stale = [
+      task('a', 24, { schedulingMode: 'manual' }),
+      task('b', 24, { start: new Date(BASE.getTime() - 30 * 86_400_000) }),
+    ]
+    const onChange = vi.fn()
+    createGantt(host, { tasks: stale, links: [link('a', 'b')], calendar, onChange, zoom: 'day' })
+
+    drag('b', 90) // one day at the day zoom
+
+    const proposed = onChange.mock.calls[0]![0].tasks.find((entry: Task) => entry.id === 'b')
+    // Drawn at BASE + 24h, so a one-day drag lands two days after BASE - nowhere near the
+    // month-old stored date.
+    expect(proposed.start.getTime()).toBe(BASE.getTime() + 48 * 3_600_000)
+  })
+
   it('ignores a click that does not move', () => {
     const onChange = vi.fn()
     createGantt(host, { ...schedule, onChange, zoom: 'day' })

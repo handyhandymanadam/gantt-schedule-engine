@@ -97,10 +97,11 @@
       <button id="critical" aria-pressed="true" type="button">Critical path</button>
       <button id="collapse" type="button">Collapse all</button>
       <button id="theme" aria-pressed="false" type="button">Dusk theme</button>
+      <button id="undo" type="button" disabled>Undo</button>
     </div>
 
     <div id="chart"></div>
-    <div id="log">Drag a bar to see the proposed changes.</div>
+    <div id="log">Drag a bar to reschedule.</div>
 
     <script type="importmap">
       {
@@ -127,8 +128,25 @@
         holidays: ['2026-04-03', '2026-05-25', '2026-07-03'],
       })
 
-      const { tasks, links, labels } = buildSchedule()
+      const initial = buildSchedule()
+      const { links, labels } = initial
+      let tasks = initial.tasks
+      const history = []
+
       const log = document.getElementById('log')
+      const undoButton = document.getElementById('undo')
+
+      const describe = (result) => {
+        const lines = result.changes
+          .slice(0, 6)
+          .map(
+            (change) =>
+              `  ${labels.get(change.taskId) ?? change.taskId}: ` +
+              `${change.startDeltaHours > 0 ? '+' : ''}${change.startDeltaHours.toFixed(1)}h (${change.reason})`,
+          )
+        const more = result.changes.length > 6 ? `\n  ...and ${result.changes.length - 6} more` : ''
+        return `${result.changes.length} task(s) moved.\n${lines.join('\n')}${more}`
+      }
 
       const chart = createGantt(document.getElementById('chart'), {
         tasks,
@@ -138,21 +156,25 @@
         zoom: 'week',
         labelOf: (task) => labels.get(task.id) ?? task.id,
         onChange: (result) => {
-          if (result.changes.length === 0) {
-            log.textContent = 'No downstream effect.'
-            return
-          }
-          const lines = result.changes
-            .slice(0, 8)
-            .map(
-              (change) =>
-                `  ${labels.get(change.taskId) ?? change.taskId}: ` +
-                `${change.startDeltaHours > 0 ? '+' : ''}${change.startDeltaHours.toFixed(1)}h (${change.reason})`,
-            )
-          const more =
-            result.changes.length > 8 ? `\n  ...and ${result.changes.length - 8} more` : ''
-          log.textContent = `Proposed: ${result.changes.length} task(s) would move.\n${lines.join('\n')}${more}`
+          // The engine only ever proposes. Applying is the application's decision - here it is
+          // taken immediately, with an undo, which is what a direct-manipulation UI wants. A
+          // schedule with more at stake would put a confirmation in front of this instead.
+          history.push(tasks)
+          tasks = result.tasks
+          chart.update({ tasks })
+          undoButton.disabled = false
+          log.textContent =
+            result.changes.length === 0 ? 'Moved, with no downstream effect.' : describe(result)
         },
+      })
+
+      undoButton.addEventListener('click', () => {
+        const previous = history.pop()
+        if (previous === undefined) return
+        tasks = previous
+        chart.update({ tasks })
+        undoButton.disabled = history.length === 0
+        log.textContent = 'Reverted.'
       })
 
       document.getElementById('zoom').addEventListener('change', (event) => {

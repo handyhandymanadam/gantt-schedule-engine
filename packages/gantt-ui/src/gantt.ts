@@ -338,7 +338,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
     bar.title = `${labelFor(row.task)}\n${formatDate(extent.start)} to ${formatDate(extent.finish)}`
 
-    if (kind !== 'summary') attachDrag(bar, row.task)
+    if (kind !== 'summary') attachDrag(bar, row.task, extent)
     return bar
   }
 
@@ -347,7 +347,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
    * the proposal goes to `onChange`, so the application can show "this moves six downstream
    * tasks" and let a human decide, exactly as the engine intends.
    */
-  function attachDrag(bar: HTMLElement, task: Task): void {
+  function attachDrag(bar: HTMLElement, task: Task, extent: Extent): void {
     bar.addEventListener('pointerdown', (event: PointerEvent) => {
       if (event.button !== 0) return
       event.preventDefault()
@@ -381,8 +381,12 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
         const moved: Task = {
           ...task,
-          start: new Date(task.start.getTime() + deltaDays * MS_PER_DAY),
-          // A dragged task is being placed by hand, so it becomes an anchor.
+          // Offset from where the task is *drawn*, not from its stored start. For anything
+          // auto-scheduled those differ: the engine placed the bar, and the stored date is
+          // whatever it happened to be authored with. Using the stored one teleports the task
+          // to a position that has nothing to do with where the user grabbed it.
+          start: new Date(extent.start.getTime() + deltaDays * MS_PER_DAY),
+          // Placing a task by hand makes it an anchor.
           schedulingMode: 'manual',
         }
         const next = opts.tasks.map((candidate) => (candidate.id === task.id ? moved : candidate))
@@ -416,6 +420,19 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     return opts.labelOf?.(task) ?? task.id
   }
 
+  /**
+   * Selection is a highlight, so it is applied in place.
+   *
+   * Re-rendering for it would be wasteful on every click, and actively broken during a drag:
+   * `render` replaces every bar, so selecting from inside `pointerdown` detaches the node the
+   * pointer is holding. The drag then moves an orphan and the chart appears frozen.
+   */
+  function applySelection(): void {
+    for (const node of root.querySelectorAll<HTMLElement>('.gantt-row, .gantt-bar')) {
+      node.dataset['selected'] = String(node.dataset['taskId'] === selected)
+    }
+  }
+
   const instance: GanttInstance = {
     element: root,
     update(next) {
@@ -433,8 +450,8 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     },
     select(taskId) {
       selected = taskId
+      applySelection()
       opts.onSelect?.(taskId)
-      render()
     },
     destroy() {
       disposeDrag?.()
