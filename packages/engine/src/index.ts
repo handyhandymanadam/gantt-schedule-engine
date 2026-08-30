@@ -62,6 +62,16 @@ export type {
   ScheduleConflict,
 } from './auto-schedule.js'
 
+export { findResourceConflicts } from './resources.js'
+export type {
+  CapacityShortfall,
+  ConflictWindow,
+  DoubleBooking,
+  ResourceConflict,
+  ResourceConflictInput,
+  ResourceConflictResult,
+} from './resources.js'
+
 export { baselineEffort, calculateRemainingWork } from './progress.js'
 export type { ForecastMethod, ForecastOptions, RemainingWork } from './progress.js'
 
