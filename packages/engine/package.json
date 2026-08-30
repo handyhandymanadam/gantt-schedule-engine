@@ -1,0 +1,40 @@
+{
+  "name": "gantt-schedule-engine",
+  "version": "0.0.0",
+  "description": "Headless project-scheduling engine: critical path, cascading auto-scheduling, working calendars, resource conflict flagging, and earned value. No DOM, no framework, no paywall.",
+  "license": "MIT",
+  "author": "handyhandymanadam <handyhandyman.adam@gmail.com>",
+  "keywords": [
+    "gantt",
+    "scheduling",
+    "scheduler",
+    "critical-path",
+    "cpm",
+    "project-management",
+    "earned-value",
+    "resource-planning",
+    "auto-scheduling",
+    "headless"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

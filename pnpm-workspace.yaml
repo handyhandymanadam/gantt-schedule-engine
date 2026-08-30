@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+
+# esbuild (pulled in by vite/vitest) needs its install script to place its platform binary.
+# Dev tooling only - the engine package itself has no runtime dependencies.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,17 @@
+{
+  "name": "gantt-schedule-engine-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --force",
+    "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "fast-check": "^3.23.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
