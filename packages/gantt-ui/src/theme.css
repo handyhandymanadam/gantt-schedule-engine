@@ -443,3 +443,33 @@
 .gantt-menu-item:focus-visible {
   background: var(--gantt-surface);
 }
+
+/* ---- Row reordering ---- */
+
+.gantt-grid-body {
+  position: relative;
+}
+
+.gantt-row[data-dragging='true'] {
+  opacity: 0.5;
+}
+
+.gantt-row[data-drop-into='true'] {
+  background: var(--gantt-surface);
+  box-shadow: inset 0 0 0 2px var(--gantt-selected);
+}
+
+.gantt-drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--gantt-selected);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.gantt-drop-line[hidden] {
+  display: none;
+}

@@ -570,3 +570,182 @@ describe('link editing', () => {
     expect(host.querySelector('.gantt-link-group')!.getAttribute('data-selected')).toBe('false')
   })
 })
+
+describe('reordering and reparenting', () => {
+  const outline = () => ({
+    tasks: [
+      task('phase1', 0),
+      task('a', 8, { parentId: 'phase1', schedulingMode: 'manual' }),
+      task('b', 8, { parentId: 'phase1' }),
+      task('phase2', 0),
+      task('c', 8, { parentId: 'phase2' }),
+    ],
+    links: [link('a', 'b'), link('b', 'c')],
+    calendar,
+    reorderable: true as const,
+  })
+
+  const ids = (tasks: readonly Task[]): string[] => tasks.map((entry) => entry.id)
+  const parentOf = (tasks: readonly Task[], id: string): string | undefined =>
+    tasks.find((entry) => entry.id === id)?.parentId
+
+  it('reorders within a parent without touching dependencies', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+
+    chart.moveTask('b', { before: 'a' })
+
+    const change = onReorder.mock.calls[0]![0]
+    expect(ids(change.tasks)).toEqual(['phase1', 'b', 'a', 'phase2', 'c'])
+    expect(parentOf(change.tasks, 'b')).toBe('phase1')
+    // Order is presentation. Nothing about the logic changed, so nothing was cut.
+    expect(change.removedLinks).toEqual([])
+    expect(change.links).toHaveLength(2)
+  })
+
+  it('moves a task into another parent', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+
+    chart.moveTask('b', { intoParent: 'phase2' })
+
+    const change = onReorder.mock.calls[0]![0]
+    expect(parentOf(change.tasks, 'b')).toBe('phase2')
+    expect(change.fromParentId).toBe('phase1')
+    expect(change.toParentId).toBe('phase2')
+  })
+
+  it('drops the dependencies a reparent invalidates', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+
+    chart.moveTask('b', { intoParent: 'phase2' })
+
+    // Both of b's links crossed out of its subtree, so both go.
+    const change = onReorder.mock.calls[0]![0]
+    expect(change.removedLinks.map((entry: Link) => entry.id).sort()).toEqual(['a->b', 'b->c'])
+    expect(change.links).toEqual([])
+  })
+
+  it('keeps dependencies when asked to', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, {
+      ...outline(),
+      breakLinksOnReparent: false,
+      onReorder,
+    })
+    chart.moveTask('b', { intoParent: 'phase2' })
+    expect(onReorder.mock.calls[0]![0].removedLinks).toEqual([])
+    expect(onReorder.mock.calls[0]![0].links).toHaveLength(2)
+  })
+
+  it('carries a whole subtree, and keeps the links inside it', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, {
+      tasks: [
+        task('root', 0),
+        task('branch', 0, { parentId: 'root' }),
+        task('leaf1', 8, { parentId: 'branch', schedulingMode: 'manual' }),
+        task('leaf2', 8, { parentId: 'branch' }),
+        task('elsewhere', 0),
+        task('other', 8, { parentId: 'elsewhere', schedulingMode: 'manual' }),
+      ],
+      // One link inside the subtree, one crossing out of it.
+      links: [link('leaf1', 'leaf2'), link('other', 'leaf1')],
+      calendar,
+      reorderable: true,
+      onReorder,
+    })
+
+    chart.moveTask('branch', { intoParent: 'elsewhere' })
+
+    const change = onReorder.mock.calls[0]![0]
+    expect(parentOf(change.tasks, 'branch')).toBe('elsewhere')
+    // The children came along and kept their own parent.
+    expect(parentOf(change.tasks, 'leaf1')).toBe('branch')
+    expect(parentOf(change.tasks, 'leaf2')).toBe('branch')
+    // The internal link survived; only the crossing one was cut.
+    expect(change.removedLinks.map((entry: Link) => entry.id)).toEqual(['other->leaf1'])
+    expect(change.links.map((entry: Link) => entry.id)).toEqual(['leaf1->leaf2'])
+  })
+
+  it('refuses to move a task inside itself', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+    chart.moveTask('phase1', { intoParent: 'phase1' })
+    expect(onReorder).not.toHaveBeenCalled()
+  })
+
+  it('refuses to move a parent into its own child', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+    chart.moveTask('phase1', { intoParent: 'a' })
+    expect(onReorder).not.toHaveBeenCalled()
+  })
+
+  it('moves a task out to the top level', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+    chart.moveTask('b', { intoParent: null })
+    expect(parentOf(onReorder.mock.calls[0]![0].tasks, 'b')).toBeUndefined()
+  })
+
+  it('reports the schedule the move implies', () => {
+    const onReorder = vi.fn()
+    const chart = createGantt(host, { ...outline(), onReorder })
+    chart.moveTask('b', { intoParent: 'phase2' })
+    // Cutting a->b frees b to start at the project start rather than after a.
+    expect(onReorder.mock.calls[0]![0].schedule).toBeDefined()
+    expect(Array.isArray(onReorder.mock.calls[0]![0].schedule.changes)).toBe(true)
+  })
+
+  it('drags a row onto a phase to reparent it', () => {
+    // jsdom has no layout, so rows report zero-height boxes. Give them real ones.
+    const onReorder = vi.fn()
+    createGantt(host, { ...outline(), onReorder })
+
+    const lines = [...host.querySelectorAll<HTMLElement>('.gantt-grid .gantt-row')]
+    lines.forEach((line, index) => {
+      line.getBoundingClientRect = () =>
+        ({ top: index * 30, bottom: index * 30 + 30, height: 30, left: 0, right: 200, width: 200, x: 0, y: index * 30, toJSON: () => ({}) }) as DOMRect
+    })
+
+    const source = lines.find((line) => line.dataset['taskId'] === 'b')!
+    const phase2Index = lines.findIndex((line) => line.dataset['taskId'] === 'phase2')
+
+    const at = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: 40, clientY: y, button: 0 })
+
+    source.dispatchEvent(at('pointerdown', 2 * 30 + 15))
+    window.dispatchEvent(at('pointermove', phase2Index * 30 + 15)) // middle third: nest
+    expect(host.querySelectorAll('.gantt-row[data-drop-into="true"]')).toHaveLength(1)
+    window.dispatchEvent(at('pointerup', phase2Index * 30 + 15))
+
+    expect(onReorder).toHaveBeenCalledTimes(1)
+    expect(onReorder.mock.calls[0]![0].toParentId).toBe('phase2')
+    expect(host.querySelector<HTMLElement>('.gantt-drop-line')!.hidden).toBe(true)
+  })
+
+  it('treats a click without movement as selection, not a move', () => {
+    const onReorder = vi.fn()
+    createGantt(host, { ...outline(), onReorder })
+    const line = host.querySelector<HTMLElement>('.gantt-grid .gantt-row')!
+    const at = (type: string): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: 40, clientY: 10, button: 0 })
+    line.dispatchEvent(at('pointerdown'))
+    window.dispatchEvent(at('pointerup'))
+    expect(onReorder).not.toHaveBeenCalled()
+  })
+
+  it('does not drag rows when reordering is off', () => {
+    const onReorder = vi.fn()
+    createGantt(host, { ...outline(), reorderable: false, onReorder })
+    const line = host.querySelector<HTMLElement>('.gantt-grid .gantt-row')!
+    const at = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: 40, clientY: y, button: 0 })
+    line.dispatchEvent(at('pointerdown', 10))
+    window.dispatchEvent(at('pointermove', 200))
+    window.dispatchEvent(at('pointerup', 200))
+    expect(onReorder).not.toHaveBeenCalled()
+  })
+})

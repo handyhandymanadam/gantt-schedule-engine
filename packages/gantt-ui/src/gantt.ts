@@ -59,6 +59,45 @@ export interface GanttOptions {
 
   /** Called when a drawn dependency was refused, so the reason can be surfaced. */
   onLinkRejected?: (rejection: LinkRejection) => void
+
+  /** Set to allow rows to be dragged into a new order, or into a different parent. */
+  reorderable?: boolean
+
+  /**
+   * Drop a task's dependencies when it moves to a different parent. Defaults to `true`.
+   *
+   * A task dragged into another phase is usually being repurposed, and its old links become both
+   * meaningless and visually chaotic - arrows striping across the chart to wherever it used to
+   * live. Only links crossing the moved subtree's boundary are cut; links wholly inside it
+   * travel with it.
+   *
+   * Reordering within the same parent never cuts anything: order is presentation, and silently
+   * destroying logic because someone tidied the outline would be its own kind of bug.
+   */
+  breakLinksOnReparent?: boolean
+
+  /** Called when a row has been dragged somewhere new. Nothing has been applied. */
+  onReorder?: (change: ReorderChange) => void
+}
+
+export interface ReorderChange {
+  /** The full proposed task list: new order, and the moved task's new parent. */
+  tasks: Task[]
+  moved: Task
+  fromParentId?: string
+  toParentId?: string
+  /** The proposed link set, after any that the move invalidated were dropped. */
+  links: Link[]
+  /** Dependencies the move removed, so the change can be described and undone. */
+  removedLinks: Link[]
+  /**
+   * What the move does to the dates.
+   *
+   * Reordering alone changes nothing - order is presentation, dependencies are logic. Changing
+   * a task's parent does change dates, because phase extents are derived from their children and
+   * a phase may itself be linked.
+   */
+  schedule: AutoScheduleResult
 }
 
 export interface LinkChange {
@@ -85,6 +124,8 @@ export interface GanttInstance {
   selectLink(linkId: string | null): void
   /** Remove a dependency by id, as the Delete key does. */
   removeLink(linkId: string): void
+  /** Move a task before another, or to the end of a parent. Mirrors a row drag. */
+  moveTask(taskId: string, options: { before?: string; intoParent?: string | null }): void
   destroy(): void
   /** Exposed for tests and for applications that want the computed schedule. */
   readonly element: HTMLElement
@@ -120,6 +161,9 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   const gridHeader = element('div', 'gantt-grid-header')
   gridHeader.textContent = 'Task'
   const gridBody = element('div', 'gantt-grid-body')
+  const dropLine = element('div', 'gantt-drop-line')
+  dropLine.hidden = true
+  gridBody.append(dropLine)
   grid.append(gridHeader, gridBody)
 
   const timeline = element('div', 'gantt-timeline')
@@ -252,7 +296,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   }
 
   function renderGrid(rows: readonly Row[]): void {
-    gridBody.replaceChildren()
+    gridBody.replaceChildren(dropLine)
     for (const row of rows) {
       const line = element('div', 'gantt-row')
       line.dataset['taskId'] = row.task.id
@@ -285,6 +329,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       }
 
       line.addEventListener('click', () => instance.select(row.task.id))
+      if (opts.reorderable === true) attachRowDrag(line, row.task.id)
       gridBody.append(line)
     }
   }
@@ -678,6 +723,249 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     opts.onLinksChange?.({ links, schedule, ...detail })
   }
 
+  /**
+   * Dragging a row to a new place in the outline.
+   *
+   * Two operations at once, because to a user they are one gesture: reordering among siblings,
+   * and moving into a different parent. Order is presentation - it changes no dates - while
+   * reparenting does, since a phase's extent is derived from its children.
+   */
+  function attachRowDrag(line: HTMLElement, taskId: string): void {
+    line.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) return
+      // Let the collapse toggle do its own job.
+      if ((event.target as HTMLElement).closest('.gantt-toggle') !== null) return
+
+      const originY = event.clientY
+      let started = false
+      let target: DropTarget | null = null
+
+      const onMove = (move: PointerEvent): void => {
+        // A few pixels of slop, so a click to select is not read as a drag.
+        if (!started && Math.abs(move.clientY - originY) < 4) return
+        started = true
+        line.dataset['dragging'] = 'true'
+
+        target = dropTargetAt(move.clientY, taskId)
+        showDropLine(target)
+      }
+
+      const onUp = (): void => {
+        const chosen = started ? target : null
+        cleanup()
+        if (chosen === null) return
+        applyMove(taskId, chosen)
+      }
+
+      const cleanup = (): void => {
+        delete line.dataset['dragging']
+        dropLine.hidden = true
+        clearDropHighlight()
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', cleanup)
+        disposeDrag = null
+      }
+
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', cleanup)
+      disposeDrag = cleanup
+    })
+  }
+
+  interface DropTarget {
+    /** Insert before this task, or append to the end of `parentId` when undefined. */
+    before?: string
+    /** The parent the task will belong to. `null` means top level. */
+    parentId: string | null
+    /** `into` drops onto a parent row itself; `between` drops in the gap between two rows. */
+    mode: 'into' | 'between'
+  }
+
+  /**
+   * Where a drop at this height would land.
+   *
+   * Hovering the middle of a phase row nests into it. Anywhere else falls to the nearest gap
+   * between rows, taking the parent of the row above - so dropping just under a task inside a
+   * phase keeps you in that phase, which is what the gesture looks like it should do.
+   */
+  function dropTargetAt(clientY: number, movingId: string): DropTarget | null {
+    const lines = [...gridBody.querySelectorAll<HTMLElement>('.gantt-row')]
+    if (lines.length === 0) return null
+
+    const forbidden = subtreeOf(movingId)
+
+    for (const line of lines) {
+      const id = line.dataset['taskId']
+      if (id === undefined) continue
+      const box = line.getBoundingClientRect()
+      if (clientY < box.top || clientY > box.bottom) continue
+
+      const third = box.height / 3
+      const isParent = line.dataset['parent'] === 'true'
+
+      // Nesting into a phase, but never into the subtree being moved.
+      if (isParent && clientY > box.top + third && clientY < box.bottom - third) {
+        if (forbidden.has(id)) return null
+        return { parentId: id, mode: 'into' }
+      }
+
+      if (clientY < box.top + box.height / 2) {
+        return { ...gapBefore(id, lines, forbidden), mode: 'between' }
+      }
+      const next = lines[lines.indexOf(line) + 1]?.dataset['taskId']
+      return next === undefined
+        ? { parentId: parentOf(id) ?? null, mode: 'between' }
+        : { ...gapBefore(next, lines, forbidden), mode: 'between' }
+    }
+
+    // Below the last row: append at the level of whatever ends the list.
+    const last = lines[lines.length - 1]?.dataset['taskId']
+    return { parentId: last === undefined ? null : (parentOf(last) ?? null), mode: 'between' }
+  }
+
+  /** The gap immediately above `beforeId`, and which parent it belongs to. */
+  function gapBefore(
+    beforeId: string,
+    lines: readonly HTMLElement[],
+    forbidden: ReadonlySet<string>,
+  ): { before?: string; parentId: string | null } {
+    const index = lines.findIndex((line) => line.dataset['taskId'] === beforeId)
+    const above = index > 0 ? lines[index - 1]?.dataset['taskId'] : undefined
+
+    // The parent of the row above, so dropping under a task inside a phase stays in that phase.
+    // Directly under an expanded phase header means becoming its first child.
+    let parentId: string | null = null
+    if (above !== undefined && !forbidden.has(above)) {
+      const aboveIsOpenParent =
+        lines[index - 1]?.dataset['parent'] === 'true' && !collapsed.has(above)
+      parentId = aboveIsOpenParent ? above : (parentOf(above) ?? null)
+    }
+    return { before: beforeId, parentId }
+  }
+
+  function parentOf(taskId: string): string | undefined {
+    return opts.tasks.find((task) => task.id === taskId)?.parentId
+  }
+
+  /** A task and everything beneath it: never a legal destination for itself. */
+  function subtreeOf(taskId: string): Set<string> {
+    const found = new Set([taskId])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const task of opts.tasks) {
+        if (task.parentId !== undefined && found.has(task.parentId) && !found.has(task.id)) {
+          found.add(task.id)
+          grew = true
+        }
+      }
+    }
+    return found
+  }
+
+  function showDropLine(target: DropTarget | null): void {
+    clearDropHighlight()
+    if (target === null) {
+      dropLine.hidden = true
+      return
+    }
+
+    if (target.mode === 'into') {
+      dropLine.hidden = true
+      const host = gridBody.querySelector<HTMLElement>(
+        `.gantt-row[data-task-id="${CSS.escape(target.parentId ?? '')}"]`,
+      )
+      if (host !== null) host.dataset['dropInto'] = 'true'
+      return
+    }
+
+    const gridBox = gridBody.getBoundingClientRect()
+    const anchor =
+      target.before === undefined
+        ? null
+        : gridBody.querySelector<HTMLElement>(
+            `.gantt-row[data-task-id="${CSS.escape(target.before)}"]`,
+          )
+    const y =
+      anchor === null
+        ? gridBody.scrollHeight
+        : anchor.getBoundingClientRect().top - gridBox.top + gridBody.scrollTop
+
+    dropLine.hidden = false
+    dropLine.style.top = `${y}px`
+    dropLine.style.marginLeft = `${target.parentId === null ? 0 : 14}px`
+  }
+
+  function clearDropHighlight(): void {
+    for (const node of gridBody.querySelectorAll<HTMLElement>('[data-drop-into]')) {
+      delete node.dataset['dropInto']
+    }
+  }
+
+  function applyMove(taskId: string, target: DropTarget): void {
+    const moved = opts.tasks.find((task) => task.id === taskId)
+    if (moved === undefined) return
+    if (target.before === taskId) return
+
+    const subtree = subtreeOf(taskId)
+    if (target.parentId !== null && subtree.has(target.parentId)) return
+
+    const reparented: Task = { ...moved }
+    if (target.parentId === null) delete reparented.parentId
+    else reparented.parentId = target.parentId
+
+    // The subtree travels with its root; children keep their own parents.
+    const block = opts.tasks.filter((task) => subtree.has(task.id))
+    const block2 = block.map((task) => (task.id === taskId ? reparented : task))
+    const rest = opts.tasks.filter((task) => !subtree.has(task.id))
+
+    const insertAt =
+      target.before === undefined
+        ? rest.length
+        : (() => {
+            const index = rest.findIndex((task) => task.id === target.before)
+            return index === -1 ? rest.length : index
+          })()
+
+    const next = [...rest.slice(0, insertAt), ...block2, ...rest.slice(insertAt)]
+
+    const links = opts.links ?? []
+    const changedParent = (moved.parentId ?? null) !== target.parentId
+
+    // Cut only the edges that cross the moved subtree's boundary. Links wholly inside it are
+    // still coherent, because the whole subtree travelled together.
+    const removedLinks =
+      changedParent && opts.breakLinksOnReparent !== false
+        ? links.filter(
+            (link) => subtree.has(link.source) !== subtree.has(link.target),
+          )
+        : []
+
+    const remainingLinks =
+      removedLinks.length === 0
+        ? links
+        : links.filter((link) => !removedLinks.includes(link))
+
+    const schedule = autoSchedule({
+      tasks: next,
+      links: remainingLinks,
+      calendar: opts.calendar ?? continuousCalendar,
+      ...(opts.statusDate === undefined ? {} : { statusDate: opts.statusDate }),
+    })
+
+    opts.onReorder?.({
+      tasks: schedule.tasks,
+      moved: reparented,
+      ...(moved.parentId === undefined ? {} : { fromParentId: moved.parentId }),
+      ...(target.parentId === null ? {} : { toParentId: target.parentId }),
+      links: [...remainingLinks],
+      removedLinks,
+      schedule,
+    })
+  }
+
   function byIdOf(taskId: string): Task {
     return (
       opts.tasks.find((task) => task.id === taskId) ?? {
@@ -738,6 +1026,17 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       applySelection()
       // Focus the chart so Delete is scoped to it rather than hijacked from the whole page.
       if (linkId !== null) root.focus({ preventScroll: true })
+    },
+    moveTask(taskId, options) {
+      const target: DropTarget =
+        options.intoParent !== undefined
+          ? { parentId: options.intoParent, mode: 'into' }
+          : {
+              parentId: options.before === undefined ? null : (parentOf(options.before) ?? null),
+              mode: 'between',
+              ...(options.before === undefined ? {} : { before: options.before }),
+            }
+      applyMove(taskId, target)
     },
     removeLink(linkId) {
       const links = opts.links ?? []

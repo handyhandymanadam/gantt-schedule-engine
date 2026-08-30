@@ -52,6 +52,28 @@ createGantt(host, {
 A dependency that would close a cycle is refused at the point of drawing rather than accepted
 and then thrown by the engine, since a cyclic graph has no schedule at all.
 
+## Reordering and reparenting
+
+Set `reorderable` and rows in the left-hand list can be dragged. Dropping in the gap between two
+rows reorders; dropping onto the middle of a phase row moves the task into that phase. A task
+carries its whole subtree, and cannot be dropped inside itself.
+
+```ts
+createGantt(host, {
+  tasks, links, calendar,
+  reorderable: true,
+  onReorder: ({ tasks, links, moved, toParentId, removedLinks, schedule }) => {
+    // removedLinks says what the move invalidated, so it can be described and undone.
+  },
+})
+```
+
+**Reordering within a parent changes nothing but the order** - it is presentation, not logic, so
+no dependency is touched. **Moving to a different parent drops the dependencies that cross the
+moved subtree's boundary**, since a task dragged into another phase is usually being repurposed
+and its old links become both meaningless and visually chaotic. Links wholly inside the moved
+subtree travel with it. Set `breakLinksOnReparent: false` to keep everything.
+
 ## What it draws
 
 Task bars with progress, phase summary bars, milestones as diamonds, dependency arrows, the

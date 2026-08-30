@@ -154,6 +154,7 @@
         links: currentLinks,
         calendar,
         editableLinks: true,
+        reorderable: true,
         statusDate: new Date('2026-05-01T11:00:00Z'),
         zoom: 'week',
         labelOf: (task) => labels.get(task.id) ?? task.id,
@@ -168,6 +169,20 @@
             : `Removed the link from ${labels.get(removed.source)} to ${labels.get(removed.target)}.`
           log.textContent =
             schedule.changes.length === 0 ? `${what} Nothing moved.` : `${what}\n${describe(schedule)}`
+        },
+        onReorder: ({ tasks: nextTasks, links: nextLinks, moved, toParentId, removedLinks, schedule }) => {
+          history.push({ tasks, links: currentLinks })
+          tasks = nextTasks
+          currentLinks = nextLinks
+          chart.update({ tasks, links: currentLinks })
+          undoButton.disabled = false
+          const where = toParentId ? ` into ${labels.get(toParentId)}` : ' to the top level'
+          const cut = removedLinks.length
+            ? ` ${removedLinks.length} dependenc${removedLinks.length === 1 ? 'y' : 'ies'} removed.`
+            : ''
+          log.textContent =
+            `Moved ${labels.get(moved.id)}${toParentId || moved.parentId ? where : ''}.${cut}` +
+            (schedule.changes.length ? `\n${describe(schedule)}` : ' Nothing moved.')
         },
         onLinkRejected: ({ reason, source, target }) => {
           const why = {
