@@ -292,3 +292,81 @@
   transform: rotate(-45deg);
   left: calc(100% + 2px);
 }
+
+/* ---- Link editing ---- */
+
+.gantt-link-group {
+  pointer-events: none;
+}
+
+/* A wide invisible stroke so a one-pixel arrow is actually clickable. */
+.gantt-link-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 10;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.gantt-link-group[data-selected='true'] .gantt-link-path,
+.gantt-link-group[data-selected='true'] .gantt-link-head {
+  stroke: var(--gantt-selected);
+  fill: none;
+}
+
+.gantt-link-group[data-selected='true'] .gantt-link-head {
+  fill: var(--gantt-selected);
+}
+
+.gantt-link-group[data-selected='true'] .gantt-link-path {
+  stroke-width: 2.5;
+}
+
+.gantt-rubber {
+  fill: none;
+  stroke: var(--gantt-selected);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* Connector handles, revealed on hover so they do not clutter a read-only chart. */
+.gantt-handle {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border: 1.5px solid var(--gantt-bg);
+  border-radius: 50%;
+  background: var(--gantt-selected);
+  opacity: 0;
+  cursor: crosshair;
+  transition: opacity 0.1s;
+}
+
+.gantt-handle-start {
+  left: -5px;
+}
+
+.gantt-handle-end {
+  right: -5px;
+}
+
+.gantt-bar:hover .gantt-handle,
+.gantt-handle:focus-visible {
+  opacity: 1;
+}
+
+.gantt-bar[data-link-target='true'] {
+  outline: 2px solid var(--gantt-selected);
+  outline-offset: 2px;
+}
+
+.gantt[data-linking='true'] .gantt-bar {
+  cursor: crosshair;
+}
+
+.gantt:focus {
+  outline: none;
+}

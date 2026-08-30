@@ -101,7 +101,7 @@
     </div>
 
     <div id="chart"></div>
-    <div id="log">Drag a bar to reschedule.</div>
+    <div id="log">Drag a bar to reschedule. Drag a handle between bars to link them.</div>
 
     <script type="importmap">
       {
@@ -131,6 +131,7 @@
       const initial = buildSchedule()
       const { links, labels } = initial
       let tasks = initial.tasks
+      let currentLinks = links
       const history = []
 
       const log = document.getElementById('log')
@@ -150,16 +151,37 @@
 
       const chart = createGantt(document.getElementById('chart'), {
         tasks,
-        links,
+        links: currentLinks,
         calendar,
+        editableLinks: true,
         statusDate: new Date('2026-05-01T11:00:00Z'),
         zoom: 'week',
         labelOf: (task) => labels.get(task.id) ?? task.id,
+        onLinksChange: ({ links: nextLinks, schedule, added, removed }) => {
+          history.push({ tasks, links: currentLinks })
+          tasks = schedule.tasks
+          currentLinks = nextLinks
+          chart.update({ tasks, links: currentLinks })
+          undoButton.disabled = false
+          const what = added
+            ? `Linked ${labels.get(added.source)} to ${labels.get(added.target)}.`
+            : `Removed the link from ${labels.get(removed.source)} to ${labels.get(removed.target)}.`
+          log.textContent =
+            schedule.changes.length === 0 ? `${what} Nothing moved.` : `${what}\n${describe(schedule)}`
+        },
+        onLinkRejected: ({ reason, source, target }) => {
+          const why = {
+            cycle: 'that would make the schedule circular, so it has no dates at all',
+            duplicate: 'they are already linked',
+            self: 'a task cannot depend on itself',
+          }[reason]
+          log.textContent = `Refused: ${labels.get(source)} to ${labels.get(target)} - ${why}.`
+        },
         onChange: (result) => {
           // The engine only ever proposes. Applying is the application's decision - here it is
           // taken immediately, with an undo, which is what a direct-manipulation UI wants. A
           // schedule with more at stake would put a confirmation in front of this instead.
-          history.push(tasks)
+          history.push({ tasks, links: currentLinks })
           tasks = result.tasks
           chart.update({ tasks })
           undoButton.disabled = false
@@ -171,8 +193,9 @@
       undoButton.addEventListener('click', () => {
         const previous = history.pop()
         if (previous === undefined) return
-        tasks = previous
-        chart.update({ tasks })
+        tasks = previous.tasks
+        currentLinks = previous.links
+        chart.update({ tasks, links: currentLinks })
         undoButton.disabled = history.length === 0
         log.textContent = 'Reverted.'
       })

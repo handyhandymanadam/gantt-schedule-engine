@@ -346,3 +346,160 @@ describe('zoom', () => {
     }
   })
 })
+
+describe('link editing', () => {
+  const base = {
+    tasks: [
+      task('a', 24, { schedulingMode: 'manual' }),
+      task('b', 24),
+      task('c', 24),
+    ],
+    links: [link('a', 'b')],
+    calendar,
+    editableLinks: true as const,
+  }
+
+  /**
+   * jsdom has no layout, so `elementFromPoint` always returns null and a link drag could never
+   * find its target. Point it at a chosen bar for the duration of the gesture.
+   */
+  const dragHandleOnto = (from: string, to: string, side: 'start' | 'end' = 'end'): void => {
+    const handle = barFor(from).querySelector<HTMLElement>(`.gantt-handle-${side}`)!
+    const target = barFor(to)
+    const original = document.elementFromPoint
+    document.elementFromPoint = () => target
+    try {
+      const at = (type: string): PointerEvent =>
+        new PointerEvent(type, { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 })
+      handle.dispatchEvent(at('pointerdown'))
+      window.dispatchEvent(at('pointermove'))
+      window.dispatchEvent(at('pointerup'))
+    } finally {
+      document.elementFromPoint = original
+    }
+  }
+
+  it('offers a handle at each end of a bar, and none on a summary', () => {
+    createGantt(host, {
+      tasks: [task('phase', 0), task('kid', 8, { parentId: 'phase', schedulingMode: 'manual' })],
+      calendar,
+      editableLinks: true,
+    })
+    expect(barFor('kid').querySelectorAll('.gantt-handle')).toHaveLength(2)
+    expect(barFor('phase').querySelectorAll('.gantt-handle')).toHaveLength(0)
+  })
+
+  it('draws no handles when editing is off', () => {
+    createGantt(host, { ...base, editableLinks: false })
+    expect(host.querySelectorAll('.gantt-handle')).toHaveLength(0)
+  })
+
+  it('creates a dependency by dragging from a finish handle', () => {
+    const onLinksChange = vi.fn()
+    createGantt(host, { ...base, onLinksChange })
+
+    dragHandleOnto('b', 'c')
+
+    expect(onLinksChange).toHaveBeenCalledTimes(1)
+    const change = onLinksChange.mock.calls[0]![0]
+    expect(change.added).toMatchObject({ source: 'b', target: 'c', type: 'FS', lag: 0 })
+    expect(change.links).toHaveLength(2)
+    // The new dependency moves 'c', and the proposal says so.
+    expect(change.schedule.changes.map((entry: { taskId: string }) => entry.taskId)).toContain('c')
+  })
+
+  it('reverses the direction when dragged from a start handle', () => {
+    const onLinksChange = vi.fn()
+    createGantt(host, { ...base, onLinksChange })
+
+    // Grabbing c's start handle and dropping on b means "c depends on b".
+    dragHandleOnto('c', 'b', 'start')
+
+    expect(onLinksChange.mock.calls[0]![0].added).toMatchObject({ source: 'b', target: 'c' })
+  })
+
+  it('refuses a link that would close a cycle', () => {
+    const onLinksChange = vi.fn()
+    const onLinkRejected = vi.fn()
+    createGantt(host, { ...base, onLinksChange, onLinkRejected })
+
+    dragHandleOnto('b', 'a') // a already precedes b
+
+    expect(onLinkRejected).toHaveBeenCalledWith({ reason: 'cycle', source: 'b', target: 'a' })
+    expect(onLinksChange).not.toHaveBeenCalled()
+  })
+
+  it('refuses a duplicate', () => {
+    const onLinkRejected = vi.fn()
+    createGantt(host, { ...base, onLinkRejected })
+    dragHandleOnto('a', 'b')
+    expect(onLinkRejected).toHaveBeenCalledWith({ reason: 'duplicate', source: 'a', target: 'b' })
+  })
+
+  it('refuses a task depending on itself', () => {
+    const onLinkRejected = vi.fn()
+    createGantt(host, { ...base, onLinkRejected })
+    dragHandleOnto('a', 'a')
+    expect(onLinkRejected).toHaveBeenCalledWith({ reason: 'self', source: 'a', target: 'a' })
+  })
+
+  it('cleans up the rubber band and the target highlight', () => {
+    createGantt(host, base)
+    dragHandleOnto('b', 'c')
+    expect(host.querySelectorAll('.gantt-rubber')).toHaveLength(0)
+    expect(host.querySelectorAll('.gantt-bar[data-link-target="true"]')).toHaveLength(0)
+    expect(host.querySelector('.gantt')?.getAttribute('data-linking')).toBeNull()
+  })
+
+  it('selects a dependency from its arrow and removes it with Delete', () => {
+    const onLinksChange = vi.fn()
+    createGantt(host, { ...base, onLinksChange })
+
+    const group = host.querySelector<SVGGElement>('.gantt-link-group')!
+    group.querySelector('.gantt-link-hit')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(group.dataset['selected']).toBe('true')
+
+    host
+      .querySelector('.gantt')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+
+    expect(onLinksChange).toHaveBeenCalledTimes(1)
+    const change = onLinksChange.mock.calls[0]![0]
+    expect(change.removed).toMatchObject({ source: 'a', target: 'b' })
+    expect(change.links).toHaveLength(0)
+  })
+
+  it('removes a dependency through the API', () => {
+    const onLinksChange = vi.fn()
+    const chart = createGantt(host, { ...base, onLinksChange })
+    chart.removeLink('a->b')
+    expect(onLinksChange.mock.calls[0]![0].links).toEqual([])
+  })
+
+  it('ignores Delete when nothing is selected', () => {
+    const onLinksChange = vi.fn()
+    createGantt(host, { ...base, onLinksChange })
+    host
+      .querySelector('.gantt')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+    expect(onLinksChange).not.toHaveBeenCalled()
+  })
+
+  it('does not delete links when editing is off', () => {
+    const onLinksChange = vi.fn()
+    const chart = createGantt(host, { ...base, editableLinks: false, onLinksChange })
+    chart.selectLink('a->b')
+    host
+      .querySelector('.gantt')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+    expect(onLinksChange).not.toHaveBeenCalled()
+  })
+
+  it('selecting a task clears any selected dependency', () => {
+    const chart = createGantt(host, base)
+    chart.selectLink('a->b')
+    expect(host.querySelector('.gantt-link-group')!.getAttribute('data-selected')).toBe('true')
+    chart.select('a')
+    expect(host.querySelector('.gantt-link-group')!.getAttribute('data-selected')).toBe('false')
+  })
+})

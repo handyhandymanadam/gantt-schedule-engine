@@ -23,6 +23,28 @@ const chart = createGantt(document.getElementById('chart'), {
 })
 ```
 
+## Editing dependencies
+
+Set `editableLinks` and hovering a bar reveals a connector handle at each end. Drag from the
+finish handle onto another bar to make this task the predecessor, or from the start handle to
+make it the successor. Click an arrow to select it and press Delete to remove it.
+
+```ts
+createGantt(host, {
+  tasks, links, calendar,
+  editableLinks: true,
+  onLinksChange: ({ links, added, removed, schedule }) => {
+    // Again a proposal: `links` is the new set, `schedule` is what it does to the dates.
+  },
+  onLinkRejected: ({ reason }) => {
+    // 'cycle' | 'duplicate' | 'self'
+  },
+})
+```
+
+A dependency that would close a cycle is refused at the point of drawing rather than accepted
+and then thrown by the engine, since a cyclic graph has no schedule at all.
+
 ## What it draws
 
 Task bars with progress, phase summary bars, milestones as diamonds, dependency arrows, the

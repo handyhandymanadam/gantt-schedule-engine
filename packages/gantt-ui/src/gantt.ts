@@ -5,6 +5,7 @@ import {
   parentIds,
   placeFinish,
   placeStart,
+  topologicalSort,
   type AutoScheduleResult,
   type Calendar,
   type Link,
@@ -43,6 +44,36 @@ export interface GanttOptions {
    */
   onChange?: (result: AutoScheduleResult) => void
   onSelect?: (taskId: string | null) => void
+
+  /**
+   * Set to allow dependencies to be drawn between bars and removed with Delete. Off by default,
+   * so a read-only chart stays read-only.
+   */
+  editableLinks?: boolean
+
+  /**
+   * Called when a dependency is added or removed, with the proposed link set and the schedule
+   * that would follow. As with `onChange`, nothing has been applied.
+   */
+  onLinksChange?: (change: LinkChange) => void
+
+  /** Called when a drawn dependency was refused, so the reason can be surfaced. */
+  onLinkRejected?: (rejection: LinkRejection) => void
+}
+
+export interface LinkChange {
+  /** The full proposed link set, ready to persist. */
+  links: Link[]
+  added?: Link
+  removed?: Link
+  /** What the change does to the dates. */
+  schedule: AutoScheduleResult
+}
+
+export interface LinkRejection {
+  reason: 'self' | 'duplicate' | 'cycle'
+  source: string
+  target: string
 }
 
 export interface GanttInstance {
@@ -50,6 +81,10 @@ export interface GanttInstance {
   setZoom(zoom: Zoom): void
   toggle(taskId: string): void
   select(taskId: string | null): void
+  /** Select a dependency, so Delete removes it. */
+  selectLink(linkId: string | null): void
+  /** Remove a dependency by id, as the Delete key does. */
+  removeLink(linkId: string): void
   destroy(): void
   /** Exposed for tests and for applications that want the computed schedule. */
   readonly element: HTMLElement
@@ -75,9 +110,11 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   let opts: GanttOptions = { showCriticalPath: true, zoom: 'week', ...options }
   const collapsed = new Set<string>()
   let selected: string | null = null
+  let selectedLink: string | null = null
 
   const root = document.createElement('div')
   root.className = 'gantt'
+  root.tabIndex = 0
 
   const grid = element('div', 'gantt-grid')
   const gridHeader = element('div', 'gantt-grid-header')
@@ -99,6 +136,14 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     gridBody.scrollTop = timeline.scrollTop
   }
   timeline.addEventListener('scroll', syncScroll)
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return
+    if (selectedLink === null || opts.editableLinks !== true) return
+    event.preventDefault()
+    instance.removeLink(selectedLink)
+  }
+  root.addEventListener('keydown', onKeyDown)
 
   let disposeDrag: (() => void) | null = null
 
@@ -284,7 +329,21 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       const source = extents.get(link.source)
       const target = extents.get(link.target)
       if (source === undefined || target === undefined) continue
-      svg.append(...arrow(xOf(source.finish), from, xOf(target.start), to, rowHeight))
+
+      const group = svgNode('g')
+      group.setAttribute('class', 'gantt-link-group')
+      group.dataset['linkId'] = link.id
+      group.dataset['selected'] = String(selectedLink === link.id)
+      group.append(...arrow(xOf(source.finish), from, xOf(target.start), to, rowHeight))
+
+      if (opts.editableLinks === true) {
+        const hit = group.querySelector('.gantt-link-hit')
+        hit?.addEventListener('click', (event) => {
+          event.stopPropagation()
+          instance.selectLink(link.id)
+        })
+      }
+      svg.append(group)
     }
 
     if (opts.statusDate !== undefined) {
@@ -338,7 +397,18 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
     bar.title = `${labelFor(row.task)}\n${formatDate(extent.start)} to ${formatDate(extent.finish)}`
 
-    if (kind !== 'summary') attachDrag(bar, row.task, extent)
+    if (kind !== 'summary') {
+      attachDrag(bar, row.task, extent)
+      if (opts.editableLinks === true) {
+        // Dragging from the finish makes this task the predecessor; from the start, the
+        // successor. Both produce the same Finish-to-Start link, just built from either end,
+        // which is how people actually reach for it.
+        bar.append(
+          linkHandle(row.task.id, 'start'),
+          linkHandle(row.task.id, 'end'),
+        )
+      }
+    }
     return bar
   }
 
@@ -416,6 +486,114 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     })
   }
 
+  function linkHandle(taskId: string, side: 'start' | 'end'): HTMLElement {
+    const handle = element('span', `gantt-handle gantt-handle-${side}`)
+    handle.dataset['side'] = side
+
+    handle.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) return
+      // Stop the bar's own move-drag: this gesture is about dependencies, not dates.
+      event.stopPropagation()
+      event.preventDefault()
+      beginLinkDrag(taskId, side, event)
+    })
+
+    return handle
+  }
+
+  function beginLinkDrag(taskId: string, side: 'start' | 'end', event: PointerEvent): void {
+    root.dataset['linking'] = 'true'
+
+    const svg = body.querySelector('.gantt-links')
+    const rubber = svgNode('path')
+    rubber.setAttribute('class', 'gantt-rubber')
+    svg?.append(rubber)
+
+    const origin = pointIn(body, event)
+    let hovered: HTMLElement | null = null
+
+    const onMove = (move: PointerEvent): void => {
+      const to = pointIn(body, move)
+      rubber.setAttribute('d', `M ${origin.x} ${origin.y} L ${to.x} ${to.y}`)
+
+      const over = barUnder(move)
+      if (over !== hovered) {
+        if (hovered !== null) delete hovered.dataset['linkTarget']
+        hovered = over !== null && over.dataset['taskId'] !== taskId ? over : null
+        if (hovered !== null) hovered.dataset['linkTarget'] = 'true'
+      }
+    }
+
+    const onUp = (up: PointerEvent): void => {
+      cleanup()
+      const over = barUnder(up)
+      const other = over?.dataset['taskId']
+      if (other === undefined) return
+      // Dragging from the finish handle makes this task the predecessor, and vice versa.
+      if (side === 'end') proposeLink(taskId, other)
+      else proposeLink(other, taskId)
+    }
+
+    const cleanup = (): void => {
+      delete root.dataset['linking']
+      if (hovered !== null) delete hovered.dataset['linkTarget']
+      rubber.remove()
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', cleanup)
+      disposeDrag = null
+    }
+
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', cleanup)
+    disposeDrag = cleanup
+  }
+
+  /**
+   * Build the proposed link, refuse it if it cannot stand, and otherwise report it along with
+   * the schedule it implies. Nothing is applied here either.
+   */
+  function proposeLink(source: string, target: string): void {
+    const links = opts.links ?? []
+
+    if (source === target) {
+      opts.onLinkRejected?.({ reason: 'self', source, target })
+      return
+    }
+    if (links.some((link) => link.source === source && link.target === target)) {
+      opts.onLinkRejected?.({ reason: 'duplicate', source, target })
+      return
+    }
+
+    const added: Link = { id: `${source}->${target}`, source, target, type: 'FS', lag: 0 }
+    const next = [...links, added]
+
+    // A cycle has no schedule at all, so it is refused at the point of drawing rather than
+    // accepted and then thrown by the engine.
+    const ids = opts.tasks.map((task) => task.id)
+    const { cycles } = topologicalSort(
+      ids,
+      next.map((link) => ({ from: link.source, to: link.target })),
+    )
+    if (cycles.length > 0) {
+      opts.onLinkRejected?.({ reason: 'cycle', source, target })
+      return
+    }
+
+    emitLinks(next, { added })
+  }
+
+  function emitLinks(links: Link[], detail: { added?: Link; removed?: Link }): void {
+    const schedule = autoSchedule({
+      tasks: opts.tasks,
+      links,
+      calendar: opts.calendar ?? continuousCalendar,
+      ...(opts.statusDate === undefined ? {} : { statusDate: opts.statusDate }),
+    })
+    opts.onLinksChange?.({ links, schedule, ...detail })
+  }
+
   function labelFor(task: Task): string {
     return opts.labelOf?.(task) ?? task.id
   }
@@ -430,6 +608,9 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   function applySelection(): void {
     for (const node of root.querySelectorAll<HTMLElement>('.gantt-row, .gantt-bar')) {
       node.dataset['selected'] = String(node.dataset['taskId'] === selected)
+    }
+    for (const node of root.querySelectorAll<SVGGElement>('.gantt-link-group')) {
+      node.dataset['selected'] = String(node.dataset['linkId'] === selectedLink)
     }
   }
 
@@ -450,12 +631,31 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     },
     select(taskId) {
       selected = taskId
+      selectedLink = null
       applySelection()
       opts.onSelect?.(taskId)
+    },
+    selectLink(linkId) {
+      selectedLink = linkId
+      selected = null
+      applySelection()
+      // Focus the chart so Delete is scoped to it rather than hijacked from the whole page.
+      if (linkId !== null) root.focus({ preventScroll: true })
+    },
+    removeLink(linkId) {
+      const links = opts.links ?? []
+      const removed = links.find((link) => link.id === linkId)
+      if (removed === undefined) return
+      if (selectedLink === linkId) selectedLink = null
+      emitLinks(
+        links.filter((link) => link.id !== linkId),
+        { removed },
+      )
     },
     destroy() {
       disposeDrag?.()
       timeline.removeEventListener('scroll', syncScroll)
+      root.removeEventListener('keydown', onKeyDown)
       root.remove()
     },
   }
@@ -596,10 +796,31 @@ function arrow(
   head.setAttribute('class', 'gantt-link-head')
   head.setAttribute('points', `${toX},${y2} ${toX - 5},${y2 - 3.5} ${toX - 5},${y2 + 3.5}`)
 
-  return [path, head]
+  // A 1.5px arrow is nearly impossible to hit, so a transparent wide stroke carries the events.
+  const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  hit.setAttribute('class', 'gantt-link-hit')
+  hit.setAttribute('d', points)
+
+  return [hit, path, head]
 }
 
 // ---- Small utilities ----
+
+function svgNode<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
+  return document.createElementNS('http://www.w3.org/2000/svg', tag)
+}
+
+/** Pointer position in the chart body's own coordinates. */
+function pointIn(host: HTMLElement, event: PointerEvent): { x: number; y: number } {
+  const box = host.getBoundingClientRect()
+  return { x: event.clientX - box.left, y: event.clientY - box.top }
+}
+
+/** The bar under the pointer, if any. Used to resolve a link drag's drop target. */
+function barUnder(event: PointerEvent): HTMLElement | null {
+  const hit = document.elementFromPoint(event.clientX, event.clientY)
+  return hit === null ? null : (hit.closest<HTMLElement>('.gantt-bar') ?? null)
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
