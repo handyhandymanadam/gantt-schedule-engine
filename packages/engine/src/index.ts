@@ -50,6 +50,9 @@ export type {
   ScheduledTask,
 } from './critical-path.js'
 
+export { expandHierarchy, parentIds, rollUpParents } from './hierarchy.js'
+export type { ExpandedGraph, ParentRollup } from './hierarchy.js'
+
 export { autoSchedule } from './auto-schedule.js'
 export type {
   AutoScheduleInput,

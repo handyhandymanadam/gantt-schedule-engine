@@ -1,6 +1,7 @@
 import { placeFinish, placeStart, type Calendar } from './calendar.js'
 import { CyclicScheduleError } from './critical-path.js'
 import { topologicalSort, type Edge } from './graph.js'
+import { expandHierarchy, parentIds, rollUpParents, type ParentRollup } from './hierarchy.js'
 import { calculateRemainingWork, type ForecastOptions } from './progress.js'
 import type { Hours, Link, Task } from './types.js'
 
@@ -65,6 +66,8 @@ export interface AutoScheduleResult {
   finishes: Map<string, Date>
   /** Places where a pin contradicts the dependency logic. Reported, never silently resolved. */
   conflicts: ScheduleConflict[]
+  /** Parents derived from their descendants, after the reschedule. */
+  parents: ParentRollup[]
 }
 
 export interface AutoScheduleInput {
@@ -89,19 +92,26 @@ export function autoSchedule(input: AutoScheduleInput): AutoScheduleResult {
   const { tasks, links = [], calendar, statusDate, forecast } = input
 
   if (tasks.length === 0) {
-    return { changes: [], tasks: [], finishes: new Map(), conflicts: [] }
+    return { changes: [], tasks: [], finishes: new Map(), conflicts: [], parents: [] }
   }
 
-  const byId = new Map(tasks.map((task) => [task.id, task]))
-  const relevant = links.filter((link) => byId.has(link.source) && byId.has(link.target))
+  // Parents carry no schedulable duration of their own; expansion swaps them for zero-duration
+  // boundary nodes so the cascade below never has to know about hierarchy.
+  const expanded = expandHierarchy(tasks, links)
+  const scheduleTasks = expanded.tasks
+
+  const byId = new Map(scheduleTasks.map((task) => [task.id, task]))
+  const relevant = expanded.links.filter(
+    (link) => byId.has(link.source) && byId.has(link.target),
+  )
 
   const predecessors = new Map<string, Link[]>()
-  for (const task of tasks) predecessors.set(task.id, [])
+  for (const task of scheduleTasks) predecessors.set(task.id, [])
   for (const link of relevant) predecessors.get(link.target)!.push(link)
 
   const edges: Edge[] = relevant.map((link) => ({ from: link.source, to: link.target }))
   const { order, cycles, unresolved } = topologicalSort(
-    tasks.map((task) => task.id),
+    scheduleTasks.map((task) => task.id),
     edges,
   )
   if (cycles.length > 0 || unresolved.length > 0) {
@@ -176,7 +186,7 @@ export function autoSchedule(input: AutoScheduleInput): AutoScheduleResult {
       // Not started and automatic: the ordinary case. Dependencies decide, floored at the data
       // date so nothing is planned into the past.
       const candidates: Date[] = [required ?? task.start]
-      if (statusDate !== undefined) candidates.push(statusDate)
+      if (statusDate !== undefined && !expanded.synthetic.has(id)) candidates.push(statusDate)
       const chosen = candidates.reduce((a, b) => (a.getTime() >= b.getTime() ? a : b))
 
       if (required === undefined || chosen.getTime() !== required.getTime()) {
@@ -193,16 +203,41 @@ export function autoSchedule(input: AutoScheduleInput): AutoScheduleResult {
 
   // ---- Diff against the input. ----
 
+  const placement = new Map<string, { start: Date; finish: Date }>()
+  for (const id of order) {
+    if (expanded.synthetic.has(id)) continue
+    placement.set(id, { start: starts.get(id)!, finish: finishes.get(id)! })
+  }
+  const parents = rollUpParents(tasks, placement, calendar, expanded)
+  for (const [id, rollup] of parents) {
+    starts.set(id, rollup.start)
+    finishes.set(id, rollup.finish)
+  }
+
+  const isParent = parentIds(tasks)
+
   const changes: ProposedChange[] = []
   const proposed: Task[] = tasks.map((task) => {
-    const start = starts.get(task.id)!
-    if (start.getTime() === task.start.getTime()) return task
+    // A parent's dates are derived from its children, so they are written back rather than
+    // proposed: both the extent and the span, so the array stays self-consistent for anyone
+    // persisting it.
+    const rollup = parents.get(task.id)
+    if (rollup !== undefined) {
+      return { ...task, start: rollup.start, duration: rollup.duration }
+    }
+    const start = starts.get(task.id)
+    if (start === undefined || start.getTime() === task.start.getTime()) return task
     return { ...task, start }
   })
 
   for (const task of tasks) {
-    const toStart = starts.get(task.id)!
-    const toFinish = finishes.get(task.id)!
+    // Parents are reported through `parents`, not as proposals. Nothing about a parent is a
+    // decision anyone can accept or decline - it follows from whatever its children do.
+    if (isParent.has(task.id)) continue
+
+    const toStart = starts.get(task.id)
+    const toFinish = finishes.get(task.id)
+    if (toStart === undefined || toFinish === undefined) continue
     // Compare against the task's *effective* current dates. A completed task whose recorded
     // actual finish differs from its planned duration has not moved, and reporting it as a
     // change would mean every finished task showed up in every reschedule.
@@ -228,5 +263,13 @@ export function autoSchedule(input: AutoScheduleInput): AutoScheduleResult {
     })
   }
 
-  return { changes, tasks: proposed, finishes, conflicts }
+  for (const id of expanded.synthetic) finishes.delete(id)
+
+  return {
+    changes,
+    tasks: proposed,
+    finishes,
+    conflicts: conflicts.filter((entry) => !expanded.synthetic.has(entry.taskId)),
+    parents: [...parents.values()],
+  }
 }

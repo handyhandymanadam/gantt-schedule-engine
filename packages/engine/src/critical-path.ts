@@ -1,5 +1,6 @@
 import { placeFinish, placeStart, type Calendar } from './calendar.js'
 import { topologicalSort, type Edge } from './graph.js'
+import { expandHierarchy, rollUpParents, type ParentRollup } from './hierarchy.js'
 import type { Hours, Link, Task } from './types.js'
 
 /**
@@ -73,6 +74,11 @@ export interface CriticalPathResult {
    * these say where the plan contradicts itself.
    */
   violations: ConstraintViolation[]
+  /**
+   * Parents derived from their descendants. Parents are never scheduled directly, so they do not
+   * appear in `tasks` or on the critical path; their extent is whatever their children occupy.
+   */
+  parents: ParentRollup[]
 }
 
 export interface CriticalPathInput {
@@ -117,15 +123,22 @@ export function calculateCriticalPath(input: CriticalPathInput): CriticalPathRes
       projectFinish: epoch,
       projectDuration: 0,
       violations: [],
+      parents: [],
     }
   }
 
-  const byId = new Map(tasks.map((task) => [task.id, task]))
-  const relevant = links.filter((link) => byId.has(link.source) && byId.has(link.target))
+  // Parents are not schedulable nodes. Expansion replaces them with zero-duration boundary
+  // nodes so the passes below never need to know hierarchy exists.
+  const expanded = expandHierarchy(tasks, links)
+  const scheduleTasks = expanded.tasks
+  const scheduleLinks = expanded.links
+
+  const byId = new Map(scheduleTasks.map((task) => [task.id, task]))
+  const relevant = scheduleLinks.filter((link) => byId.has(link.source) && byId.has(link.target))
 
   const predecessors = new Map<string, Link[]>()
   const successors = new Map<string, Link[]>()
-  for (const task of tasks) {
+  for (const task of scheduleTasks) {
     predecessors.set(task.id, [])
     successors.set(task.id, [])
   }
@@ -136,7 +149,7 @@ export function calculateCriticalPath(input: CriticalPathInput): CriticalPathRes
 
   const edges: Edge[] = relevant.map((link) => ({ from: link.source, to: link.target }))
   const { order, cycles, unresolved } = topologicalSort(
-    tasks.map((task) => task.id),
+    scheduleTasks.map((task) => task.id),
     edges,
   )
 
@@ -223,7 +236,7 @@ export function calculateCriticalPath(input: CriticalPathInput): CriticalPathRes
 
   // ---- Slack and the critical chain. ----
 
-  const scheduled: ScheduledTask[] = order.map((id) => {
+  const allScheduled: ScheduledTask[] = order.map((id) => {
     const es = earlyStart.get(id)!
     const ef = earlyFinish.get(id)!
     const ls = lateStart.get(id)!
@@ -254,13 +267,22 @@ export function calculateCriticalPath(input: CriticalPathInput): CriticalPathRes
     }
   })
 
+  // Boundary nodes exist only to carry phase-level links; they are not part of the plan.
+  const scheduled = allScheduled.filter((entry) => !expanded.synthetic.has(entry.taskId))
+
+  const placement = new Map(
+    scheduled.map((entry) => [entry.taskId, { start: entry.earlyStart, finish: entry.earlyFinish }]),
+  )
+  const parents = rollUpParents(tasks, placement, calendar, expanded)
+
   return {
     tasks: scheduled,
     criticalPath: scheduled.filter((entry) => entry.isCritical).map((entry) => entry.taskId),
     projectStart,
     projectFinish,
     projectDuration: calendar.workingHoursBetween(projectStart, projectFinish),
-    violations,
+    violations: violations.filter((entry) => !expanded.synthetic.has(entry.taskId)),
+    parents: [...parents.values()],
   }
 }
 
