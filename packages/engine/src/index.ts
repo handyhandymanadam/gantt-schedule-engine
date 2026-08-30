@@ -62,6 +62,14 @@ export type {
   ScheduleConflict,
 } from './auto-schedule.js'
 
+export { calculateProgressVariance, captureBaseline } from './variance.js'
+export type {
+  GroupVariance,
+  ProgressVarianceInput,
+  ProgressVarianceResult,
+  TaskVariance,
+} from './variance.js'
+
 export { findResourceConflicts } from './resources.js'
 export type {
   CapacityShortfall,

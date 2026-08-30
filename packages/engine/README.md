@@ -6,8 +6,9 @@ paid tier.
 
 **Zero runtime dependencies.** No DOM, no framework, no fetching.
 
-> **Status: pre-release.** The API is unstable and the engine has not yet been validated against
-> real production schedules. Read it, clone it, but do not depend on it yet.
+> **Status: v1 feature-complete, pre-release.** Everything below is implemented and tested, but
+> the engine has not yet been validated against real production schedules and the API may still
+> change. Read it, clone it, but do not depend on it yet.
 
 ## Install
 
@@ -37,6 +38,10 @@ what to do with the result. The engine holds no state, fetches nothing, and muta
   downstream tasks" and let a human decide.
 - **`findResourceConflicts`** — overlapping assignments and capacity shortfalls, flagged rather
   than automatically resolved, and annotated with which tasks can absorb the conflict.
+- **`calculateProgressVariance`** — earned value: performance factor, forecast at completion, and
+  variance against a frozen baseline, aggregated per resource type.
+- **`captureBaseline`** — freeze the plan so variance measures against what was committed rather
+  than against a since-revised estimate.
 - **`validate`** — one authoritative rule set, including dependency-cycle detection. Mirror it in
   your client rather than hand-writing a second copy that drifts.
 - **`WorkingWeekCalendar`** — working days, split shifts, holidays and one-off exceptions, with

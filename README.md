@@ -5,9 +5,9 @@ A headless project-scheduling engine, MIT licensed.
 Critical path, cascading auto-scheduling, working calendars, resource-conflict flagging, and
 earned value — the capabilities every comparable library puts behind a paid tier.
 
-> **Status: pre-release, under active development.** The API is unstable and the engine has not
-> yet been validated against real production schedules. It is not published to npm. Read it,
-> clone it, but do not depend on it yet.
+> **Status: v1 engine feature-complete, pre-release.** All of the scope below is implemented and
+> tested, but the engine has not yet been validated against real production schedules and the API
+> may still change. Not published to npm. Read it, clone it, but do not depend on it yet.
 
 ## Why this exists
 
