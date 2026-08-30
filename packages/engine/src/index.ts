@@ -26,6 +26,14 @@ export type { Calendar } from './calendar.js'
 export { topologicalSort } from './graph.js'
 export type { Edge, TopologicalResult } from './graph.js'
 
+export { calculateCriticalPath, CyclicScheduleError } from './critical-path.js'
+export type {
+  ConstraintViolation,
+  CriticalPathInput,
+  CriticalPathResult,
+  ScheduledTask,
+} from './critical-path.js'
+
 export { validate } from './validate.js'
 export type {
   Severity,
