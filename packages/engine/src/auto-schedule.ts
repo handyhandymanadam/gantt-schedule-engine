@@ -244,12 +244,13 @@ export function autoSchedule(input: AutoScheduleInput): AutoScheduleResult {
     const fromStart = task.actualStart ?? task.start
     const fromFinish = task.actualFinish ?? placeFinish(fromStart, task.duration, calendar)
 
-    if (
-      toStart.getTime() === fromStart.getTime() &&
-      toFinish.getTime() === fromFinish.getTime()
-    ) {
-      continue
-    }
+    // A change is a task being *moved*. Scheduling owns starts; it does not own durations, and
+    // the finish reported for an in-progress task is a projection from remaining work rather
+    // than a proposed edit to the estimate. Diffing on the finish as well would report every
+    // started task on every run for ever, because applying the result never changes the stored
+    // duration the projection disagrees with. The projected finish still travels in the
+    // payload; it just does not, on its own, constitute a change.
+    if (toStart.getTime() === fromStart.getTime()) continue
 
     changes.push({
       taskId: task.id,

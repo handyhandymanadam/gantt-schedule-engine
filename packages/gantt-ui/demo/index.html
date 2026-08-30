@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>gantt-schedule-ui demo</title>
+    <link rel="stylesheet" href="../src/theme.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #eef0f3;
+        color: #1c2024;
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+      }
+      p.lede {
+        margin: 0 0 20px;
+        max-width: 70ch;
+        color: #5b6472;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+      button,
+      select {
+        padding: 5px 10px;
+        border: 1px solid #c3c9d1;
+        border-radius: 4px;
+        background: #fff;
+        font: inherit;
+        cursor: pointer;
+      }
+      button[aria-pressed="true"] {
+        border-color: #2b6cb0;
+        background: #e8f0fa;
+      }
+      #chart {
+        height: 460px;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+      }
+      #log {
+        margin-top: 14px;
+        padding: 10px 12px;
+        min-height: 44px;
+        border-radius: 6px;
+        background: #fff;
+        border: 1px solid #dfe3e8;
+        font-variant-numeric: tabular-nums;
+        white-space: pre-wrap;
+      }
+      /* A consuming application themes the chart by redefining tokens, never by overriding rules. */
+      .theme-dusk .gantt {
+        --gantt-bg: #16191d;
+        --gantt-surface: #1e2228;
+        --gantt-border: #2b3138;
+        --gantt-border-strong: #3a424c;
+        --gantt-nonworking: #1a1e23;
+        --gantt-text: #e6e9ed;
+        --gantt-text-muted: #9aa4b2;
+        --gantt-bar: #5b8ac6;
+        --gantt-bar-progress: #b8d0ec;
+        --gantt-bar-critical: #cf6a5c;
+        --gantt-bar-critical-progress: #f0b3aa;
+        --gantt-summary: #8b96a5;
+        --gantt-milestone: #cfd6de;
+        --gantt-link: #77828f;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>gantt-schedule-ui</h1>
+    <p class="lede">
+      A house build: seven phases, fifty tasks, a Monday&ndash;Friday calendar with a lunch break
+      and three holidays. Every date, the critical path in red, and each phase bar all come from
+      the engine. Drag a bar and the engine reports what it would move &mdash; nothing is applied.
+    </p>
+
+    <div class="toolbar">
+      <label>
+        Zoom
+        <select id="zoom">
+          <option value="day">Day</option>
+          <option value="week" selected>Week</option>
+          <option value="month">Month</option>
+        </select>
+      </label>
+      <button id="critical" aria-pressed="true" type="button">Critical path</button>
+      <button id="collapse" type="button">Collapse all</button>
+      <button id="theme" aria-pressed="false" type="button">Dusk theme</button>
+    </div>
+
+    <div id="chart"></div>
+    <div id="log">Drag a bar to see the proposed changes.</div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "gantt-schedule-engine": "../../engine/dist/index.js"
+        }
+      }
+    </script>
+    <script type="module">
+      import { WorkingWeekCalendar } from 'gantt-schedule-engine'
+      import { createGantt } from '../dist/index.js'
+      import { SPECS, PHASES, buildSchedule } from './fixture.js'
+
+      const calendar = new WorkingWeekCalendar({
+        week: Object.fromEntries(
+          [1, 2, 3, 4, 5].map((day) => [
+            day,
+            [
+              { start: '07:00', end: '11:30' },
+              { start: '12:00', end: '15:30' },
+            ],
+          ]),
+        ),
+        holidays: ['2026-04-03', '2026-05-25', '2026-07-03'],
+      })
+
+      const { tasks, links, labels } = buildSchedule()
+      const log = document.getElementById('log')
+
+      const chart = createGantt(document.getElementById('chart'), {
+        tasks,
+        links,
+        calendar,
+        statusDate: new Date('2026-05-01T11:00:00Z'),
+        zoom: 'week',
+        labelOf: (task) => labels.get(task.id) ?? task.id,
+        onChange: (result) => {
+          if (result.changes.length === 0) {
+            log.textContent = 'No downstream effect.'
+            return
+          }
+          const lines = result.changes
+            .slice(0, 8)
+            .map(
+              (change) =>
+                `  ${labels.get(change.taskId) ?? change.taskId}: ` +
+                `${change.startDeltaHours > 0 ? '+' : ''}${change.startDeltaHours.toFixed(1)}h (${change.reason})`,
+            )
+          const more =
+            result.changes.length > 8 ? `\n  ...and ${result.changes.length - 8} more` : ''
+          log.textContent = `Proposed: ${result.changes.length} task(s) would move.\n${lines.join('\n')}${more}`
+        },
+      })
+
+      document.getElementById('zoom').addEventListener('change', (event) => {
+        chart.setZoom(event.target.value)
+      })
+
+      const criticalButton = document.getElementById('critical')
+      criticalButton.addEventListener('click', () => {
+        const next = criticalButton.getAttribute('aria-pressed') !== 'true'
+        criticalButton.setAttribute('aria-pressed', String(next))
+        chart.update({ showCriticalPath: next })
+      })
+
+      let allCollapsed = false
+      document.getElementById('collapse').addEventListener('click', (event) => {
+        allCollapsed = !allCollapsed
+        for (const phase of PHASES) chart.toggle(phase)
+        event.target.textContent = allCollapsed ? 'Expand all' : 'Collapse all'
+      })
+
+      const themeButton = document.getElementById('theme')
+      themeButton.addEventListener('click', () => {
+        const next = themeButton.getAttribute('aria-pressed') !== 'true'
+        themeButton.setAttribute('aria-pressed', String(next))
+        document.body.classList.toggle('theme-dusk', next)
+      })
+
+      window.SPECS = SPECS
+    </script>
+  </body>
+</html>

@@ -1,0 +1,294 @@
+/*
+ * Neutral default styling.
+ *
+ * Every colour and metric is a custom property, so a consuming application themes the chart by
+ * redefining tokens rather than by overriding rules. Nothing here belongs to any particular
+ * product's design language - that is the point. Override what you need on `.gantt` or on any
+ * ancestor.
+ */
+
+.gantt {
+  /* Surfaces */
+  --gantt-bg: #ffffff;
+  --gantt-surface: #f7f8fa;
+  --gantt-border: #dfe3e8;
+  --gantt-border-strong: #c3c9d1;
+  --gantt-nonworking: #f1f3f5;
+
+  /* Text */
+  --gantt-text: #1c2024;
+  --gantt-text-muted: #6b7280;
+  --gantt-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --gantt-font-size: 13px;
+
+  /* Bars */
+  --gantt-bar: #4a72b0;
+  --gantt-bar-text: #ffffff;
+  --gantt-bar-progress: #2f4f80;
+  --gantt-bar-critical: #b4544a;
+  --gantt-bar-critical-progress: #7f3a33;
+  --gantt-summary: #5b6472;
+  --gantt-milestone: #3f4a5a;
+
+  /* Lines and markers */
+  --gantt-link: #8a94a3;
+  --gantt-status-line: #c0563f;
+  --gantt-selected: #2b6cb0;
+
+  /* Metrics */
+  --gantt-row-height: 30px;
+  --gantt-bar-height: 16px;
+  --gantt-header-height: 48px;
+  --gantt-radius: 3px;
+
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--gantt-border);
+  background: var(--gantt-bg);
+  color: var(--gantt-text);
+  font-family: var(--gantt-font);
+  font-size: var(--gantt-font-size);
+  line-height: 1.4;
+}
+
+/* ---- Left grid ---- */
+
+.gantt-grid {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  border-right: 1px solid var(--gantt-border-strong);
+  background: var(--gantt-bg);
+}
+
+.gantt-grid-header {
+  display: flex;
+  align-items: flex-end;
+  height: var(--gantt-header-height);
+  box-sizing: border-box;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--gantt-border-strong);
+  background: var(--gantt-surface);
+  font-weight: 600;
+  color: var(--gantt-text-muted);
+}
+
+.gantt-grid-body {
+  overflow: hidden;
+  flex: 1 1 auto;
+}
+
+.gantt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--gantt-row-height);
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--gantt-border);
+  white-space: nowrap;
+}
+
+.gantt-row[data-parent='true'] {
+  font-weight: 600;
+}
+
+.gantt-row[data-selected='true'] {
+  box-shadow: inset 2px 0 0 var(--gantt-selected);
+}
+
+.gantt-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+
+.gantt-row-meta {
+  flex: 0 0 auto;
+  color: var(--gantt-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gantt-toggle {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gantt-text-muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.gantt-toggle-spacer {
+  flex: 0 0 auto;
+  width: 14px;
+}
+
+/* ---- Right timeline ---- */
+
+.gantt-timeline {
+  position: relative;
+  overflow: auto;
+  flex: 1 1 auto;
+}
+
+.gantt-timeline-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: var(--gantt-header-height);
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--gantt-border-strong);
+  background: var(--gantt-surface);
+}
+
+.gantt-tier {
+  position: relative;
+  height: calc(var(--gantt-header-height) / 2);
+}
+
+.gantt-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border-left: 1px solid var(--gantt-border);
+  overflow: hidden;
+  color: var(--gantt-text-muted);
+  white-space: nowrap;
+}
+
+.gantt-tier-major .gantt-tick {
+  border-left-color: var(--gantt-border-strong);
+  color: var(--gantt-text);
+  font-weight: 600;
+}
+
+.gantt-body {
+  position: relative;
+}
+
+.gantt-nonworking-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--gantt-nonworking);
+}
+
+.gantt-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--gantt-border);
+}
+
+.gantt-rowline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--gantt-border);
+}
+
+.gantt-links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.gantt-link-path {
+  fill: none;
+  stroke: var(--gantt-link);
+  stroke-width: 1.5;
+}
+
+.gantt-link-head {
+  fill: var(--gantt-link);
+}
+
+.gantt-status-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--gantt-status-line);
+  pointer-events: none;
+}
+
+/* ---- Bars ---- */
+
+.gantt-bar {
+  position: absolute;
+  box-sizing: border-box;
+  height: var(--gantt-bar-height);
+  border-radius: var(--gantt-radius);
+  background: var(--gantt-bar);
+  color: var(--gantt-bar-text);
+  cursor: grab;
+  user-select: none;
+}
+
+.gantt-bar[data-critical='true'] {
+  background: var(--gantt-bar-critical);
+}
+
+.gantt-bar[data-dragging='true'] {
+  cursor: grabbing;
+  opacity: 0.75;
+}
+
+.gantt-bar[data-selected='true'] {
+  outline: 2px solid var(--gantt-selected);
+  outline-offset: 1px;
+}
+
+.gantt-bar-progress {
+  height: 100%;
+  border-radius: var(--gantt-radius) 0 0 var(--gantt-radius);
+  background: var(--gantt-bar-progress);
+  pointer-events: none;
+}
+
+.gantt-bar[data-critical='true'] .gantt-bar-progress {
+  background: var(--gantt-bar-critical-progress);
+}
+
+.gantt-bar-label {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 6px);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  color: var(--gantt-text);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* A summary bar reads as a bracket over its children rather than as work of its own. */
+.gantt-bar[data-kind='summary'] {
+  height: 8px;
+  border-radius: 1px;
+  background: var(--gantt-summary);
+  cursor: default;
+}
+
+.gantt-bar[data-kind='milestone'] {
+  width: var(--gantt-bar-height);
+  height: var(--gantt-bar-height);
+  border-radius: 2px;
+  background: var(--gantt-milestone);
+  transform: rotate(45deg);
+}
+
+.gantt-bar[data-kind='milestone'] .gantt-bar-label {
+  transform: rotate(-45deg);
+  left: calc(100% + 2px);
+}

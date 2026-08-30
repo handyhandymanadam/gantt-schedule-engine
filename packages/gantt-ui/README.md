@@ -1,10 +1,66 @@
 # gantt-schedule-ui
 
-Reference Gantt renderer for `gantt-schedule-engine`.
+A Gantt chart for [`gantt-schedule-engine`](../engine). Vanilla DOM, no framework, no
+dependencies beyond the engine itself.
 
-**Not started.** This package is the last item in the build order: the engine is the scarce part
-and is built and proven first. Free Gantt renderers already exist, so this one exists to
-demonstrate the engine and to give consuming applications a base to theme.
+> **Status: pre-release**, alongside the engine.
 
-When built, it will be vanilla JS with neutral default styling driven by CSS custom properties,
-so any consuming application can apply its own theme. Framework wrappers may follow.
+```ts
+import { createGantt } from 'gantt-schedule-ui'
+import 'gantt-schedule-ui/theme.css'
+import { WorkingWeekCalendar } from 'gantt-schedule-engine'
+
+const chart = createGantt(document.getElementById('chart'), {
+  tasks,
+  links,
+  calendar: new WorkingWeekCalendar(),
+  statusDate: new Date(),
+  labelOf: (task) => names.get(task.id),
+  onChange: (proposal) => {
+    // Nothing has been applied. Show the ripple, then persist proposal.tasks if accepted.
+    console.log(`${proposal.changes.length} task(s) would move`)
+  },
+})
+```
+
+## What it draws
+
+Task bars with progress, phase summary bars, milestones as diamonds, dependency arrows, the
+zero-slack critical chain, non-working days shaded from the calendar, and the data date.
+Phases collapse and expand; the timeline zooms by day, week or month.
+
+**The renderer computes nothing.** Every date, the critical path, and every phase extent come
+from the engine. Dragging a bar produces an engine *proposal* rather than a mutation: the chart
+hands `onChange` the full set of downstream changes and the application decides whether they
+happen. That is the engine's contract, carried up to the UI.
+
+## Theming
+
+Every colour and metric is a CSS custom property, so themes are applied by redefining tokens
+rather than by overriding rules:
+
+```css
+.my-app .gantt {
+  --gantt-bar: #4a72b0;
+  --gantt-bar-critical: #b4544a;
+  --gantt-row-height: 34px;
+}
+```
+
+The full token list is at the top of [`src/theme.css`](src/theme.css). The defaults are
+deliberately neutral and belong to no particular design language.
+
+## Demo
+
+`demo/index.html` renders a fifty-task house build on a working week with holidays. Serve the
+repository root and open it:
+
+```bash
+pnpm build && python3 -m http.server 8173
+```
+
+Then visit `/packages/gantt-ui/demo/index.html`.
+
+## Licence
+
+MIT.

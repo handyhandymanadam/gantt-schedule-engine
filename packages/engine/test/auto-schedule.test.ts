@@ -394,6 +394,30 @@ describe('autoSchedule: properties', () => {
       }
     })
 
+  it('is idempotent when work is under way', () => {
+    // In-progress tasks project a finish from remaining work that will not match
+    // `start + duration`. If that alone counted as a change, every started task would be
+    // reported on every run and the schedule would never settle.
+    fc.assert(
+      fc.property(
+        anySchedule,
+        fc.integer({ min: 1, max: 99 }),
+        fc.integer({ min: 1, max: 200 }),
+        ({ tasks, links }, percent, actual) => {
+          const underway = tasks.map((entry, index) =>
+            index % 2 === 0 && entry.duration > 0
+              ? { ...entry, percentComplete: percent, actualHours: actual, actualStart: entry.start }
+              : entry,
+          )
+          const statusDate = h(20)
+          const first = autoSchedule({ tasks: underway, links, calendar, statusDate })
+          const second = autoSchedule({ tasks: first.tasks, links, calendar, statusDate })
+          expect(second.changes).toEqual([])
+        },
+      ),
+    )
+  })
+
   it('is idempotent: rescheduling its own output proposes nothing', () => {
     fc.assert(
       fc.property(anySchedule, ({ tasks, links }) => {

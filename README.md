@@ -51,7 +51,7 @@ coexist on one schedule: framing is effort-driven, concrete curing is not.
 | Package | Purpose |
 |---|---|
 | `packages/engine` | The scheduling engine. Framework-agnostic, no dependencies. |
-| `packages/gantt-ui` | A reference Gantt renderer consuming the engine. Neutral default styling. Not started. |
+| `packages/gantt-ui` | Gantt renderer consuming the engine. Vanilla DOM, neutral default styling, themed by CSS custom properties. |
 
 ## Scope
 
@@ -75,7 +75,11 @@ resources, WBS codes, undo/redo, export.
 pnpm install
 pnpm test          # vitest
 pnpm typecheck     # tsc across the workspace
+pnpm build         # both packages
 ```
+
+For the chart demo, build and serve the repository root, then open
+`/packages/gantt-ui/demo/index.html`.
 
 Testing runs in three layers: textbook CPM worked examples with published answers, property-based
 tests over the invariants via fast-check, and golden snapshots of a realistic schedule. The math
