@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ContinuousCalendar, WorkingWeekCalendar } from 'gantt-schedule-engine'
+import { ContinuousCalendar, WorkingWeekCalendar, validate } from 'gantt-schedule-engine'
 import type { Link, Task } from 'gantt-schedule-engine'
 import { createGantt } from '../src/gantt.js'
 
@@ -904,5 +904,132 @@ describe('reordering and reparenting', () => {
     window.dispatchEvent(at('pointermove', 200))
     window.dispatchEvent(at('pointerup', 200))
     expect(onReorder).not.toHaveBeenCalled()
+  })
+})
+
+describe('hooks for consumer-owned editing', () => {
+  const base = {
+    tasks: [
+      task('a', 24, { schedulingMode: 'manual', basis: 'effort', effort: 24, resourceCount: 1 }),
+      task('b', 24),
+    ],
+    links: [link('a', 'b')],
+    calendar,
+  }
+
+  it('reports a double-click so a host can open its own editor', () => {
+    const onTaskActivate = vi.fn()
+    createGantt(host, { ...base, onTaskActivate })
+
+    barFor('a').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    expect(onTaskActivate).toHaveBeenCalledWith('a')
+
+    host
+      .querySelector<HTMLElement>('.gantt-grid .gantt-row[data-task-id="b"]')!
+      .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    expect(onTaskActivate).toHaveBeenCalledWith('b')
+  })
+
+  it('renders host-supplied context menu entries on a task', () => {
+    const onSelect = vi.fn()
+    createGantt(host, {
+      ...base,
+      menuItemsFor: (context) =>
+        context.type === 'task' ? [{ label: `Edit ${context.taskId}`, onSelect }] : [],
+    })
+
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })
+    barFor('a').dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+
+    const menu = host.querySelector<HTMLElement>('.gantt-menu')!
+    expect(menu.hidden).toBe(false)
+    expect(menu.textContent).toBe('Edit a')
+    menu.querySelector<HTMLButtonElement>('.gantt-menu-item')!.click()
+    expect(onSelect).toHaveBeenCalled()
+  })
+
+  it('leaves the native menu alone when the host offers nothing', () => {
+    createGantt(host, base)
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })
+    barFor('a').dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(host.querySelector<HTMLElement>('.gantt-menu')!.hidden).toBe(true)
+  })
+
+  it('adds host entries to the dependency menu without losing Remove', () => {
+    createGantt(host, {
+      ...base,
+      editableLinks: true,
+      menuItemsFor: (context) =>
+        context.type === 'link' ? [{ label: 'Set lag', onSelect: () => {} }] : [],
+    })
+    host
+      .querySelector('.gantt-link-hit')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    const labels = [...host.querySelectorAll('.gantt-menu-item')].map((node) => node.textContent)
+    expect(labels[0]).toContain('Remove dependency')
+    expect(labels).toContain('Set lag')
+  })
+})
+
+describe('resizing a bar', () => {
+  const one = {
+    tasks: [task('a', 24, { schedulingMode: 'manual', basis: 'effort', effort: 48, resourceCount: 2 })],
+    calendar,
+    zoom: 24 as const,
+  }
+
+  it('offers a grip on a task but not on a milestone', () => {
+    createGantt(host, {
+      tasks: [
+        task('work', 24, { schedulingMode: 'manual' }),
+        task('mark', 0, { schedulingMode: 'manual' }),
+      ],
+      calendar,
+    })
+    expect(barFor('work').querySelector('.gantt-resize-grip')).not.toBeNull()
+    expect(barFor('mark').querySelector('.gantt-resize-grip')).toBeNull()
+  })
+
+  it('can be turned off', () => {
+    createGantt(host, { ...one, resizableBars: false })
+    expect(host.querySelector('.gantt-resize-grip')).toBeNull()
+  })
+
+  it('changes duration and keeps the effort invariant true', () => {
+    const onChange = vi.fn()
+    createGantt(host, { ...one, onChange })
+
+    const grip = barFor('a').querySelector<HTMLElement>('.gantt-resize-grip')!
+    const at = (type: string, x: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, button: 0 })
+    grip.dispatchEvent(at('pointerdown', 0))
+    window.dispatchEvent(at('pointermove', 24)) // one day at 24px/day
+    window.dispatchEvent(at('pointerup', 24))
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const proposed = onChange.mock.calls[0]![0].tasks.find((entry: Task) => entry.id === 'a')!
+    expect(proposed.duration).toBeGreaterThan(24)
+    // The pair must stay consistent, whichever basis the task declares.
+    expect(proposed.effort).toBeCloseTo(proposed.duration * proposed.resourceCount, 9)
+    expect(validate({ tasks: [proposed] }).errors).toEqual([])
+  })
+
+  it('does not also move the task', () => {
+    const onChange = vi.fn()
+    createGantt(host, { ...one, onChange })
+    const before = barFor('a').style.left
+
+    const grip = barFor('a').querySelector<HTMLElement>('.gantt-resize-grip')!
+    const at = (type: string, x: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, button: 0 })
+    grip.dispatchEvent(at('pointerdown', 0))
+    window.dispatchEvent(at('pointermove', 48))
+    window.dispatchEvent(at('pointerup', 48))
+
+    const proposed = onChange.mock.calls[0]![0].tasks.find((entry: Task) => entry.id === 'a')!
+    expect(proposed.start.getTime()).toBe(BASE.getTime())
+    expect(barFor('a').style.left).toBe(before)
   })
 })

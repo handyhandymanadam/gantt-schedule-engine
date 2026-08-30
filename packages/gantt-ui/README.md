@@ -52,6 +52,42 @@ createGantt(host, {
 A dependency that would close a cycle is refused at the point of drawing rather than accepted
 and then thrown by the engine, since a cyclic graph has no schedule at all.
 
+## Creating and editing tasks
+
+**Deliberately not included.** The engine's `Task` has no name, no description and no cost code,
+because those belong to your data - which is also why `labelOf` is a callback. Any form shipped
+here would be too thin to use or too opinionated to fit, and it would pull in validation UI,
+translation and input styling that have nothing to do with scheduling.
+
+What the chart provides instead are the hooks a host cannot add from outside:
+
+```ts
+createGantt(host, {
+  tasks, links, calendar,
+  onTaskActivate: (taskId) => openYourEditor(taskId),   // double-click, bar or row
+  menuItemsFor: (context) =>
+    context.type === 'task'
+      ? [
+          { label: 'Edit\u2026', onSelect: () => openYourEditor(context.taskId) },
+          { label: 'Add task after', onSelect: () => addAfter(context.taskId) },
+          { label: 'Delete task', onSelect: () => remove(context.taskId) },
+        ]
+      : [{ label: 'Set lag', onSelect: () => editLag(context.linkId) }],
+})
+```
+
+The chart owns the menu chrome, placement and dismissal; you own what is in it and what it does.
+Entries added for a dependency appear alongside the built-in Remove. With no `menuItemsFor`, a
+right-click on a bar leaves the browser's own menu alone.
+
+`demo/index.html` implements add, edit and delete entirely through these hooks, which is the
+point: none of it needed to be in the library.
+
+**Changing a duration is different** - that is a scheduling gesture, not a form field, so it is
+built in. Dragging a bar's finish rewrites the duration and keeps
+`effort / resourceCount === duration` true whichever basis the task declares. Set
+`resizableBars: false` to turn it off.
+
 ## Reordering and reparenting
 
 Set `reorderable` and rows **in the left-hand task list** can be dragged (bars drag dates; rows

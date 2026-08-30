@@ -56,6 +56,20 @@
       #zoom-slider {
         width: 130px;
       }
+      #editor {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+        padding: 10px 12px;
+        border: 1px solid #dfe3e8;
+        border-radius: 6px;
+        background: #fff;
+      }
+      #editor[hidden] { display: none; }
+      #editor label { display: flex; align-items: center; gap: 5px; }
+      #editor input { width: 92px; padding: 4px 6px; border: 1px solid #c3c9d1; border-radius: 4px; font: inherit; }
       #log {
         margin-top: 14px;
         padding: 10px 12px;
@@ -96,8 +110,9 @@
       <strong>Drag a bar</strong> to move a task. <strong>Hover a bar</strong> for its connector
       handles and drag one onto another bar to add a dependency. <strong>Right-click an
       arrow</strong> to remove it. <strong>Drag a row</strong> in the left-hand list to reorder it,
-      or onto a phase to move it there. Zoom with the slider, or hold <kbd>Ctrl</kbd> and scroll
-      over the chart. The engine only ever proposes; this page applies what it proposes, which is
+      or onto a phase to move it there. <strong>Double-click</strong> a task to edit it, or
+      right-click for add and delete &mdash; that editor is this page's code, not the library's.
+      Zoom with the slider, or hold <kbd>Ctrl</kbd> and scroll over the chart. The engine only ever proposes; this page applies what it proposes, which is
       why Undo is one line.
     </p>
 
@@ -126,7 +141,8 @@
     </div>
 
     <div id="chart"></div>
-    <div id="log">Drag a bar to reschedule. Drag a handle between bars to link them. Right-click an arrow to remove it.</div>
+    <div id="editor" hidden></div>
+    <div id="log">Double-click a task to edit it, or right-click for more. Drag a bar to reschedule. Drag a handle between bars to link them. Right-click an arrow to remove it.</div>
 
     <script type="importmap">
       {
@@ -186,6 +202,18 @@
         zoom: 'week',
         labelOf: (task) => labels.get(task.id) ?? task.id,
         onZoom: () => showScale(),
+
+        // Editing lives here, in the application, not in the chart. The chart supplies the
+        // gesture and the menu chrome; what a task *is* belongs to whoever owns the data.
+        onTaskActivate: (taskId) => openEditor(taskId),
+        menuItemsFor: (context) =>
+          context.type !== 'task'
+            ? []
+            : [
+                { label: 'Edit\u2026', onSelect: () => openEditor(context.taskId) },
+                { label: 'Add task after', onSelect: () => addTaskAfter(context.taskId) },
+                { label: 'Delete task', onSelect: () => deleteTask(context.taskId) },
+              ],
         onLinksChange: ({ links: nextLinks, schedule, added, removed }) => {
           history.push({ tasks, links: currentLinks })
           tasks = schedule.tasks
@@ -232,6 +260,108 @@
             result.changes.length === 0 ? 'Moved, with no downstream effect.' : describe(result)
         },
       })
+
+      // ---- Task creation and editing: entirely this page's business ----
+
+      let nextId = 1
+
+      function commit(nextTasks, nextLinks, note) {
+        history.push({ tasks, links: currentLinks })
+        tasks = nextTasks
+        currentLinks = nextLinks ?? currentLinks
+        chart.update({ tasks, links: currentLinks })
+        undoButton.disabled = false
+        log.textContent = note
+      }
+
+      function addTaskAfter(taskId) {
+        const anchor = tasks.find((entry) => entry.id === taskId)
+        if (!anchor) return
+        const id = `new-${nextId++}`
+        labels.set(id, `New task ${nextId - 1}`)
+
+        const created = {
+          id,
+          basis: 'effort',
+          effort: 16,
+          resourceCount: 2,
+          duration: 8,
+          resourceType: anchor.resourceType,
+          parentId: anchor.parentId,
+          start: anchor.start,
+          schedulingMode: 'auto',
+        }
+        const at = tasks.indexOf(anchor) + 1
+        const next = [...tasks.slice(0, at), created, ...tasks.slice(at)]
+        // Chain it after the task it was added below, which is what the gesture implies.
+        const withLink = [
+          ...currentLinks,
+          { id: `${taskId}->${id}`, source: taskId, target: id, type: 'FS', lag: 0 },
+        ]
+        commit(withLink === currentLinks ? next : next, withLink, `Added ${labels.get(id)} after ${labels.get(taskId)}.`)
+      }
+
+      function deleteTask(taskId) {
+        const doomed = new Set([taskId])
+        let grew = true
+        while (grew) {
+          grew = false
+          for (const entry of tasks) {
+            if (entry.parentId && doomed.has(entry.parentId) && !doomed.has(entry.id)) {
+              doomed.add(entry.id)
+              grew = true
+            }
+          }
+        }
+        const next = tasks.filter((entry) => !doomed.has(entry.id))
+        const nextLinks = currentLinks.filter(
+          (l) => !doomed.has(l.source) && !doomed.has(l.target),
+        )
+        commit(
+          next,
+          nextLinks,
+          `Deleted ${labels.get(taskId)}${doomed.size > 1 ? ` and ${doomed.size - 1} child task(s)` : ''}.`,
+        )
+      }
+
+      const editor = document.getElementById('editor')
+
+      function openEditor(taskId) {
+        const entry = tasks.find((t) => t.id === taskId)
+        if (!entry) return
+        editor.hidden = false
+        editor.innerHTML = `
+          <strong>${labels.get(taskId) ?? taskId}</strong>
+          <label>Name <input id="f-name" value="${labels.get(taskId) ?? taskId}"></label>
+          <label>Work (h) <input id="f-effort" type="number" min="0" step="1" value="${entry.effort ?? entry.duration * entry.resourceCount}"></label>
+          <label>Crew <input id="f-crew" type="number" min="0.25" step="0.25" value="${entry.resourceCount}"></label>
+          <label>Trade <input id="f-trade" value="${entry.resourceType ?? ''}"></label>
+          <button id="f-save" type="button">Save</button>
+          <button id="f-cancel" type="button">Cancel</button>`
+
+        editor.querySelector('#f-cancel').addEventListener('click', () => { editor.hidden = true })
+        editor.querySelector('#f-save').addEventListener('click', () => {
+          const effort = Number(editor.querySelector('#f-effort').value)
+          const crew = Number(editor.querySelector('#f-crew').value)
+          labels.set(taskId, editor.querySelector('#f-name').value || taskId)
+          const trade = editor.querySelector('#f-trade').value.trim()
+
+          const updated = tasks.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  effort,
+                  resourceCount: crew,
+                  // The engine's own invariant: keep the pair consistent.
+                  duration: effort / crew,
+                  ...(trade ? { resourceType: trade } : {}),
+                }
+              : t,
+          )
+          editor.hidden = true
+          commit(updated, currentLinks, `Updated ${labels.get(taskId)}.`)
+        })
+      }
 
       undoButton.addEventListener('click', () => {
         const previous = history.pop()

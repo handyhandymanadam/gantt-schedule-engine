@@ -55,6 +55,26 @@ export interface GanttOptions {
   onZoom?: (pixelsPerDay: number) => void
 
   /**
+   * Double-clicking a bar or a row. The obvious place to open your own editor.
+   *
+   * There is deliberately no built-in one: the engine's task has no name, no description and no
+   * cost code, because those belong to your data. A form here would be either too thin to use or
+   * too opinionated to fit.
+   */
+  onTaskActivate?: (taskId: string) => void
+
+  /**
+   * Extra context-menu entries. The chart owns the menu; you own what is in it.
+   *
+   * Called with what was right-clicked, so an application can offer Add, Rename, Delete or
+   * anything else without reimplementing menu chrome, placement or dismissal.
+   */
+  menuItemsFor?: (context: MenuContext) => readonly ContextMenuItem[]
+
+  /** Set to allow a bar's finish to be dragged, changing its duration. Defaults to true. */
+  resizableBars?: boolean
+
+  /**
    * Set to allow dependencies to be drawn between bars and removed with Delete. Off by default,
    * so a read-only chart stays read-only.
    */
@@ -87,6 +107,15 @@ export interface GanttOptions {
 
   /** Called when a row has been dragged somewhere new. Nothing has been applied. */
   onReorder?: (change: ReorderChange) => void
+}
+
+export type MenuContext =
+  | { type: 'task'; taskId: string }
+  | { type: 'link'; linkId: string; source: string; target: string }
+
+export interface ContextMenuItem {
+  label: string
+  onSelect: () => void
 }
 
 export interface ReorderChange {
@@ -216,11 +245,6 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   }
   timeline.addEventListener('scroll', syncScroll)
 
-  interface MenuItem {
-    label: string
-    onSelect: () => void
-  }
-
   /**
    * A small context menu, positioned inside the chart.
    *
@@ -228,7 +252,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
    * the Delete key. Scheduling is mouse work, and a mouse user should never have to discover a
    * keyboard shortcut to undo something they drew with the mouse.
    */
-  function openMenu(clientX: number, clientY: number, items: readonly MenuItem[]): void {
+  function openMenu(clientX: number, clientY: number, items: readonly ContextMenuItem[]): void {
     menu.replaceChildren()
     for (const item of items) {
       const button = element('button', 'gantt-menu-item')
@@ -399,6 +423,14 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       }
 
       line.addEventListener('click', () => instance.select(row.task.id))
+      line.addEventListener('dblclick', () => opts.onTaskActivate?.(row.task.id))
+      line.addEventListener('contextmenu', (event) => {
+        const extra = opts.menuItemsFor?.({ type: 'task', taskId: row.task.id }) ?? []
+        if (extra.length === 0) return
+        event.preventDefault()
+        instance.select(row.task.id)
+        openMenu(event.clientX, event.clientY, extra)
+      })
       if (opts.reorderable === true) attachRowDrag(line, row.task.id)
       gridRows.append(line)
     }
@@ -521,11 +553,19 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
           mouse.preventDefault()
           mouse.stopPropagation()
           instance.selectLink(link.id)
+          const extra =
+            opts.menuItemsFor?.({
+              type: 'link',
+              linkId: link.id,
+              source: link.source,
+              target: link.target,
+            }) ?? []
           openMenu(mouse.clientX, mouse.clientY, [
             {
               label: `Remove dependency: ${labelFor(byIdOf(link.source))} \u2192 ${labelFor(byIdOf(link.target))}`,
               onSelect: () => instance.removeLink(link.id),
             },
+            ...extra,
           ])
         })
 
@@ -596,8 +636,27 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
     bar.title = `${labelFor(row.task)}\n${formatDate(extent.start)} to ${formatDate(extent.finish)}`
 
+    bar.addEventListener('dblclick', (event) => {
+      event.stopPropagation()
+      opts.onTaskActivate?.(row.task.id)
+    })
+
+    bar.addEventListener('contextmenu', (event) => {
+      const extra = opts.menuItemsFor?.({ type: 'task', taskId: row.task.id }) ?? []
+      if (extra.length === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      instance.select(row.task.id)
+      openMenu(event.clientX, event.clientY, extra)
+    })
+
     if (kind !== 'summary') {
       attachDrag(bar, row.task, extent)
+
+      if (opts.resizableBars !== false && row.task.duration > 0) {
+        bar.append(resizeGrip(row.task, extent))
+      }
+
       if (opts.editableLinks === true) {
         // Dragging from the finish makes this task the predecessor; from the start, the
         // successor. Both produce the same Finish-to-Start link, just built from either end,
@@ -683,6 +742,82 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       window.addEventListener('pointercancel', cleanup)
       disposeDrag = cleanup
     })
+  }
+
+  /**
+   * Dragging a bar's finish to change how long it takes.
+   *
+   * This is a scheduling interaction rather than a form field, so it belongs here. The authored
+   * quantity is rewritten to keep `effort / resourceCount === duration` true whichever basis the
+   * task uses - the user has just authored a duration by hand, and the pair must not drift.
+   */
+  function resizeGrip(task: Task, extent: Extent): HTMLElement {
+    const grip = element('span', 'gantt-resize-grip')
+    grip.title = 'Drag to change duration'
+
+    grip.addEventListener('pointerdown', (event: PointerEvent) => {
+      if (event.button !== 0) return
+      event.stopPropagation()
+      event.preventDefault()
+
+      const calendar = opts.calendar ?? continuousCalendar
+      const originX = event.clientX
+      const startWidth = parseFloat(grip.parentElement?.style.width ?? '0')
+
+      const onMove = (move: PointerEvent): void => {
+        const width = Math.max(2, startWidth + (move.clientX - originX))
+        const owner = grip.parentElement
+        if (owner !== null) owner.style.width = `${width}px`
+      }
+
+      const onUp = (up: PointerEvent): void => {
+        cleanup()
+        const deltaDays = (up.clientX - originX) / lastScale
+        if (Math.abs(deltaDays) < 0.01) {
+          render()
+          return
+        }
+
+        const finish = new Date(extent.finish.getTime() + deltaDays * MS_PER_DAY)
+        const duration = Math.max(
+          0.25,
+          calendar.workingHoursBetween(extent.start, calendar.previousWorkingMoment(finish)),
+        )
+
+        const resized: Task = {
+          ...task,
+          duration,
+          effort: duration * task.resourceCount,
+        }
+        const next = opts.tasks.map((candidate) =>
+          candidate.id === task.id ? resized : candidate,
+        )
+
+        opts.onChange?.(
+          autoSchedule({
+            tasks: next,
+            links: opts.links ?? [],
+            calendar,
+            ...(opts.statusDate === undefined ? {} : { statusDate: opts.statusDate }),
+          }),
+        )
+        render()
+      }
+
+      const cleanup = (): void => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', cleanup)
+        disposeDrag = null
+      }
+
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', cleanup)
+      disposeDrag = cleanup
+    })
+
+    return grip
   }
 
   function linkHandle(taskId: string, side: 'start' | 'end'): HTMLElement {

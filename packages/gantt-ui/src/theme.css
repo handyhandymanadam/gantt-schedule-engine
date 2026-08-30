@@ -374,11 +374,11 @@
 }
 
 .gantt-handle-start {
-  left: -5px;
+  left: -14px;
 }
 
 .gantt-handle-end {
-  right: -5px;
+  right: -14px;
 }
 
 .gantt-bar:hover .gantt-handle,
@@ -526,4 +526,22 @@
 
 .gantt-row:hover .gantt-grip {
   opacity: 0.7;
+}
+
+
+/* Resize grip: a target at the bar's own finish, clear of the link connector outside it. */
+.gantt-resize-grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  border-radius: 0 var(--gantt-radius) var(--gantt-radius) 0;
+  background: rgb(255 255 255 / 45%);
+  opacity: 0;
+  cursor: ew-resize;
+}
+
+.gantt-bar:hover .gantt-resize-grip {
+  opacity: 1;
 }
