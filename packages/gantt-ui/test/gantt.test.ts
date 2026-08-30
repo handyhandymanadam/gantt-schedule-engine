@@ -726,6 +726,38 @@ describe('reordering and reparenting', () => {
     expect(host.querySelector<HTMLElement>('.gantt-drop-line')!.hidden).toBe(true)
   })
 
+  it('signals that rows are draggable', () => {
+    // Without a grip and a grab cursor, a draggable row is indistinguishable from a static one.
+    createGantt(host, outline())
+    expect(host.querySelector('.gantt')!.getAttribute('data-reorderable')).toBe('true')
+    expect(host.querySelectorAll('.gantt-grip').length).toBeGreaterThan(0)
+  })
+
+  it('shows no grip when reordering is off', () => {
+    createGantt(host, { ...outline(), reorderable: false })
+    expect(host.querySelector('.gantt')!.getAttribute('data-reorderable')).toBe('false')
+    expect(host.querySelectorAll('.gantt-grip')).toHaveLength(0)
+  })
+
+  it('suppresses the native text selection once a drag starts', () => {
+    // A real mouse drag over a row otherwise selects the text, which swamps the gesture.
+    createGantt(host, outline())
+    const lines = [...host.querySelectorAll<HTMLElement>('.gantt-grid .gantt-row')]
+    lines.forEach((line, index) => {
+      line.getBoundingClientRect = () =>
+        ({ top: index * 30, bottom: index * 30 + 30, height: 30, left: 0, right: 200, width: 200, x: 0, y: index * 30, toJSON: () => ({}) }) as DOMRect
+    })
+
+    const at = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, cancelable: true, clientX: 40, clientY: y, button: 0 })
+
+    lines[1]!.dispatchEvent(at('pointerdown', 45))
+    const move = at('pointermove', 120)
+    window.dispatchEvent(move)
+    expect(move.defaultPrevented).toBe(true)
+    window.dispatchEvent(at('pointerup', 120))
+  })
+
   it('treats a click without movement as selection, not a move', () => {
     const onReorder = vi.fn()
     createGantt(host, { ...outline(), onReorder })

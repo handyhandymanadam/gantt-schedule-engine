@@ -279,6 +279,8 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     const width = Math.max(240, ((range.to - range.from) / MS_PER_DAY) * pxPerDay)
     const rowHeight = readRowHeight(root)
 
+    root.dataset['reorderable'] = String(opts.reorderable === true)
+
     renderGrid(rows)
     renderHeader(range, pxPerDay, width, opts.zoom ?? 'week')
     renderBody({
@@ -303,6 +305,14 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       line.dataset['parent'] = String(row.isParent)
       line.dataset['selected'] = String(selected === row.task.id)
       line.style.paddingLeft = `${8 + row.depth * 14}px`
+
+      if (opts.reorderable === true) {
+        const grip = element('span', 'gantt-grip')
+        grip.setAttribute('aria-hidden', 'true')
+        grip.textContent = '\u283f'
+        grip.title = 'Drag to reorder, or onto a phase to move it there'
+        line.append(grip)
+      }
 
       if (row.hasChildren) {
         const toggle = element('button', 'gantt-toggle')
@@ -743,6 +753,10 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       const onMove = (move: PointerEvent): void => {
         // A few pixels of slop, so a click to select is not read as a drag.
         if (!started && Math.abs(move.clientY - originY) < 4) return
+        // Only once the gesture is definitely a drag: preventing default on pointerdown would
+        // also swallow the click that selects a row.
+        move.preventDefault()
+        if (!started) window.getSelection()?.removeAllRanges()
         started = true
         line.dataset['dragging'] = 'true'
 

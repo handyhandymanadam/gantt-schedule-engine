@@ -473,3 +473,31 @@
 .gantt-drop-line[hidden] {
   display: none;
 }
+
+/* Reorder affordances. Without a cursor and a grip, a draggable row looks exactly like a
+   static one - and a real mouse drag selects the text instead, which swamps the gesture. */
+
+.gantt[data-reorderable='true'] .gantt-row {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gantt[data-reorderable='true'] .gantt-row[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.gantt-grip {
+  flex: 0 0 auto;
+  width: 10px;
+  margin-left: -2px;
+  color: var(--gantt-text-muted);
+  opacity: 0;
+  font-size: 11px;
+  line-height: 1;
+  transition: opacity 0.1s;
+}
+
+.gantt-row:hover .gantt-grip {
+  opacity: 0.7;
+}

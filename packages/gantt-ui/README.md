@@ -54,7 +54,8 @@ and then thrown by the engine, since a cyclic graph has no schedule at all.
 
 ## Reordering and reparenting
 
-Set `reorderable` and rows in the left-hand list can be dragged. Dropping in the gap between two
+Set `reorderable` and rows **in the left-hand task list** can be dragged (bars drag dates; rows
+drag position). A grip appears on hover and the cursor turns to a grab handle. Dropping in the gap between two
 rows reorders; dropping onto the middle of a phase row moves the task into that phase. A task
 carries its whole subtree, and cannot be dropped inside itself.
 
