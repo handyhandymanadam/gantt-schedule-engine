@@ -44,6 +44,15 @@
   display: flex;
   position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  /*
+   * Fill the container rather than growing to fit the rows.
+   *
+   * Without this the chart is as tall as its task list, the container clips it, and every row
+   * past the fold is unreachable - while the timeline, being equally tall, has nothing to
+   * scroll. Give the container a height; the chart scrolls inside it.
+   */
+  height: 100%;
   border: 1px solid var(--gantt-border);
   background: var(--gantt-bg);
   color: var(--gantt-text);
@@ -58,6 +67,7 @@
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
+  min-height: 0;
   border-right: 1px solid var(--gantt-border-strong);
   background: var(--gantt-bg);
 }
@@ -66,6 +76,9 @@
   display: flex;
   align-items: flex-end;
   height: var(--gantt-header-height);
+  /* Never shrink: a flex item defaults to shrinking, and a grid header even a few pixels
+     shorter than the timeline's offsets every row against its own bar. */
+  flex: 0 0 var(--gantt-header-height);
   box-sizing: border-box;
   padding: 0 8px 6px;
   border-bottom: 1px solid var(--gantt-border-strong);
@@ -77,6 +90,19 @@
 .gantt-grid-body {
   overflow: hidden;
   flex: 1 1 auto;
+  /*
+   * Flex items default to min-height:auto and refuse to shrink below their content, which left
+   * this box exactly as tall as its rows - so it had no scroll range, and syncing scrollTop
+   * against the timeline silently did nothing.
+   */
+  min-height: 0;
+  position: relative;
+}
+
+/* The translated layer. Its height is its rows; the pane above it does the clipping. */
+.gantt-grid-rows {
+  position: relative;
+  will-change: transform;
 }
 
 .gantt-row {
@@ -134,6 +160,8 @@
   position: relative;
   overflow: auto;
   flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 .gantt-timeline-header {
@@ -446,9 +474,7 @@
 
 /* ---- Row reordering ---- */
 
-.gantt-grid-body {
-  position: relative;
-}
+
 
 .gantt-row[data-dragging='true'] {
   opacity: 0.5;

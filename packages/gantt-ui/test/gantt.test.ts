@@ -160,6 +160,45 @@ describe('rendering', () => {
   })
 })
 
+describe('scroll containment', () => {
+  const many = {
+    tasks: Array.from({ length: 40 }, (_, index) =>
+      task(`t${index}`, 8, { schedulingMode: 'manual', start: h(index * 8) }),
+    ),
+    calendar,
+  }
+
+  it('keeps rows in a layer that is translated, not scrolled', () => {
+    // Scrolling that layer would clamp at its own content height, which is shorter than the
+    // timeline's scroll range, and the two panes would drift apart at the bottom.
+    createGantt(host, many)
+    const layer = host.querySelector<HTMLElement>('.gantt-grid-rows')!
+    expect(layer).not.toBeNull()
+    expect(layer.querySelectorAll('.gantt-row').length).toBe(40)
+    expect(host.querySelector('.gantt-grid-body > .gantt-row')).toBeNull()
+  })
+
+  it('translates the rows to match the timeline scroll', () => {
+    createGantt(host, many)
+    const timeline = host.querySelector<HTMLElement>('.gantt-timeline')!
+    const layer = host.querySelector<HTMLElement>('.gantt-grid-rows')!
+
+    Object.defineProperty(timeline, 'scrollTop', { value: 250, configurable: true })
+    timeline.dispatchEvent(new Event('scroll'))
+    expect(layer.style.transform).toBe('translateY(-250px)')
+
+    Object.defineProperty(timeline, 'scrollTop', { value: 0, configurable: true })
+    timeline.dispatchEvent(new Event('scroll'))
+    expect(layer.style.transform).toBe('translateY(0px)')
+  })
+
+  it('keeps the drop indicator inside the translated layer', () => {
+    // Otherwise it would sit still while the rows it points between move.
+    createGantt(host, { ...many, reorderable: true })
+    expect(host.querySelector('.gantt-grid-rows > .gantt-drop-line')).not.toBeNull()
+  })
+})
+
 describe('hierarchy and interaction', () => {
   const nested = {
     tasks: [

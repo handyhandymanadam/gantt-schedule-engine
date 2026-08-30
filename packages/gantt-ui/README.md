@@ -86,6 +86,17 @@ from the engine. Dragging a bar produces an engine *proposal* rather than a muta
 hands `onChange` the full set of downstream changes and the application decides whether they
 happen. That is the engine's contract, carried up to the UI.
 
+## Sizing
+
+The chart fills its container and scrolls inside it, so **give the container a height**:
+
+```css
+#chart { height: 460px; }
+```
+
+Without one the chart grows to the height of its task list, and anything past the container's
+edge is clipped and unreachable.
+
 ## Theming
 
 Every colour and metric is a CSS custom property, so themes are applied by redefining tokens

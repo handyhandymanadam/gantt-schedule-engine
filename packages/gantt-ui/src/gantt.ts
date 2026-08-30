@@ -161,9 +161,15 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   const gridHeader = element('div', 'gantt-grid-header')
   gridHeader.textContent = 'Task'
   const gridBody = element('div', 'gantt-grid-body')
+  // Rows live in an inner layer that is translated rather than scrolled. Scrolling it would
+  // clamp at its own content height, which is shorter than the timeline's scroll range - the
+  // timeline's scroller also contains its sticky header and a horizontal scrollbar - so the two
+  // panes would drift apart by that difference at the bottom of a long schedule.
+  const gridRows = element('div', 'gantt-grid-rows')
   const dropLine = element('div', 'gantt-drop-line')
   dropLine.hidden = true
-  gridBody.append(dropLine)
+  gridRows.append(dropLine)
+  gridBody.append(gridRows)
   grid.append(gridHeader, gridBody)
 
   const timeline = element('div', 'gantt-timeline')
@@ -181,7 +187,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   // The grid scrolls only as a consequence of the timeline scrolling; it has no scrollbar of
   // its own, so the two can never drift apart.
   const syncScroll = (): void => {
-    gridBody.scrollTop = timeline.scrollTop
+    gridRows.style.transform = `translateY(${-timeline.scrollTop}px)`
   }
   timeline.addEventListener('scroll', syncScroll)
 
@@ -298,7 +304,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   }
 
   function renderGrid(rows: readonly Row[]): void {
-    gridBody.replaceChildren(dropLine)
+    gridRows.replaceChildren(dropLine)
     for (const row of rows) {
       const line = element('div', 'gantt-row')
       line.dataset['taskId'] = row.task.id
@@ -340,7 +346,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
       line.addEventListener('click', () => instance.select(row.task.id))
       if (opts.reorderable === true) attachRowDrag(line, row.task.id)
-      gridBody.append(line)
+      gridRows.append(line)
     }
   }
 
@@ -805,7 +811,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
    * phase keeps you in that phase, which is what the gesture looks like it should do.
    */
   function dropTargetAt(clientY: number, movingId: string): DropTarget | null {
-    const lines = [...gridBody.querySelectorAll<HTMLElement>('.gantt-row')]
+    const lines = [...gridRows.querySelectorAll<HTMLElement>('.gantt-row')]
     if (lines.length === 0) return null
 
     const forbidden = subtreeOf(movingId)
@@ -888,24 +894,20 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
 
     if (target.mode === 'into') {
       dropLine.hidden = true
-      const host = gridBody.querySelector<HTMLElement>(
+      const host = gridRows.querySelector<HTMLElement>(
         `.gantt-row[data-task-id="${CSS.escape(target.parentId ?? '')}"]`,
       )
       if (host !== null) host.dataset['dropInto'] = 'true'
       return
     }
 
-    const gridBox = gridBody.getBoundingClientRect()
     const anchor =
       target.before === undefined
         ? null
-        : gridBody.querySelector<HTMLElement>(
+        : gridRows.querySelector<HTMLElement>(
             `.gantt-row[data-task-id="${CSS.escape(target.before)}"]`,
           )
-    const y =
-      anchor === null
-        ? gridBody.scrollHeight
-        : anchor.getBoundingClientRect().top - gridBox.top + gridBody.scrollTop
+    const y = anchor === null ? gridRows.scrollHeight : anchor.offsetTop
 
     dropLine.hidden = false
     dropLine.style.top = `${y}px`
@@ -913,7 +915,7 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   }
 
   function clearDropHighlight(): void {
-    for (const node of gridBody.querySelectorAll<HTMLElement>('[data-drop-into]')) {
+    for (const node of gridRows.querySelectorAll<HTMLElement>('[data-drop-into]')) {
       delete node.dataset['dropInto']
     }
   }
