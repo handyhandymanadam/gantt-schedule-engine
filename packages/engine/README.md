@@ -60,7 +60,7 @@ milestone and carry a duration at the same time.
 ## Documentation
 
 Full design rationale, the research behind the scope, and the reasoning for each decision are in
-`docs/DESIGN.md` in the repository.
+[docs/DESIGN.md](https://github.com/handyhandymanadam/gantt-schedule-engine/blob/main/docs/DESIGN.md).
 
 ## Licence
 

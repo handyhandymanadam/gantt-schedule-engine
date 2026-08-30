@@ -4,6 +4,15 @@
   "description": "Headless project-scheduling engine: critical path, cascading auto-scheduling, working calendars, resource conflict flagging, and earned value. No DOM, no framework, no paywall.",
   "license": "MIT",
   "author": "handyhandymanadam <handyhandyman.adam@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/handyhandymanadam/gantt-schedule-engine.git",
+    "directory": "packages/engine"
+  },
+  "homepage": "https://github.com/handyhandymanadam/gantt-schedule-engine#readme",
+  "bugs": {
+    "url": "https://github.com/handyhandymanadam/gantt-schedule-engine/issues"
+  },
   "keywords": [
     "gantt",
     "scheduling",

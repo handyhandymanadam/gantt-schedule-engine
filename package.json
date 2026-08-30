@@ -13,5 +13,10 @@
     "fast-check": "^3.23.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/handyhandymanadam/gantt-schedule-engine.git"
+  },
+  "license": "MIT"
 }
