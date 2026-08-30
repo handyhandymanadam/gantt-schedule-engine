@@ -76,6 +76,9 @@ const DEFAULT_WEEK: Partial<Record<Weekday, readonly Shift[]>> = {
 /** Guards the day-walking loops against a configuration that never yields working time. */
 const MAX_DAYS_SCANNED = 40_000
 
+/** Roughly four years of days: comfortably more than any one schedule touches repeatedly. */
+const SPAN_CACHE_LIMIT = 1_500
+
 export class WorkingWeekCalendar implements Calendar {
   readonly nominalHoursPerDay: number
 
@@ -93,6 +96,16 @@ export class WorkingWeekCalendar implements Calendar {
   /** Dates that depart from the pattern, as day indices, sorted so a range can be binary-searched. */
   private readonly overrideDays: number[] = []
   private readonly overrideMinutes = new Map<number, number>()
+
+  /**
+   * Absolute spans for recently asked-about days.
+   *
+   * Scheduling walks a graph in dependency order, so consecutive questions land on the same day
+   * or its neighbours over and over. Rebuilding the day's intervals each time - and re-running
+   * the offset resolver with them - is most of what the primitives cost. The calendar is
+   * immutable after construction, so a cached day can never go stale.
+   */
+  private readonly spanCache = new Map<number, Interval[]>()
 
   constructor(options: WorkingWeekOptions = {}) {
     const { week = DEFAULT_WEEK, holidays = [], exceptions = {}, utcOffsetMinutes = 0 } = options
@@ -403,11 +416,20 @@ export class WorkingWeekCalendar implements Calendar {
 
   /** Working intervals for a local day index, as absolute UTC millisecond spans. */
   private spansForDay(dayIndex: number): Interval[] {
+    const cached = this.spanCache.get(dayIndex)
+    if (cached !== undefined) return cached
+
     const midnightUtc = dayIndex * MS_PER_DAY - this.offsetMsForDay(dayIndex)
-    return this.intervalsForDay(dayIndex).map((interval) => ({
+    const spans = this.intervalsForDay(dayIndex).map((interval) => ({
       start: midnightUtc + interval.start * MS_PER_MINUTE,
       end: midnightUtc + interval.end * MS_PER_MINUTE,
     }))
+
+    // Bounded, and cleared wholesale rather than evicted one at a time: the access pattern is
+    // local, so a simple bound keeps the working set without any bookkeeping.
+    if (this.spanCache.size >= SPAN_CACHE_LIMIT) this.spanCache.clear()
+    this.spanCache.set(dayIndex, spans)
+    return spans
   }
 
   /** Minute-of-day intervals for a local day index, applying exceptions then holidays. */

@@ -63,6 +63,30 @@ length, since day length varies between calendars.
 Zero-duration tasks are milestones. There is no separate flag, so a task cannot claim to be a
 milestone and carry a duration at the same time.
 
+## Performance
+
+Measured on a chained, phase-structured schedule with a working-week calendar, holidays and
+progress reported on a seventh of the tasks:
+
+| | 500 tasks | 2,000 tasks | 10,000 tasks |
+|---|---|---|---|
+| `validate` | 0.9 ms | 1.7 ms | 9 ms |
+| `calculateCriticalPath` | 4 ms | 13 ms | 74 ms |
+| `autoSchedule` | 3 ms | 8 ms | 40 ms |
+| `findResourceConflicts` | 0.6 ms | 1.3 ms | 6 ms |
+| `calculateProgressVariance` | 0.6 ms | 1.5 ms | 6 ms |
+
+Two things carry that. A calendar range is whole-week arithmetic plus corrections for the few
+dates that depart from the pattern, so measuring a span costs the same whether it covers a week
+or twenty years. And conflict detection is a sweep line rather than a scan per boundary.
+
+**Threading.** Every function is synchronous and pure over plain data, which is exactly what makes
+it easy to run in a worker: post the tasks and links across, call the function, post the result
+back. That stays the consumer's decision, because it is rarely worth it - copying 10,000 tasks to
+a worker and back costs about 26 ms against 40 ms of computation, so the win is keeping the main
+thread free rather than finishing sooner. Making the engine itself async would put every caller
+into promises for something that takes 8 ms on a schedule of realistic size.
+
 ## Documentation
 
 Full design rationale, the research behind the scope, and the reasoning for each decision are in
