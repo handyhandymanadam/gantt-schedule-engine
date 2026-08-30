@@ -90,3 +90,27 @@ export class ContinuousCalendar implements Calendar {
 
 /** The default calendar: continuous time with a nominal 8-hour day for authoring conveniences. */
 export const continuousCalendar: Calendar = new ContinuousCalendar(8)
+
+/**
+ * Where a task's start instant lands, once the calendar has its say.
+ *
+ * Ordinary work normalises **forward** to the next working moment: if dependencies free it at
+ * 17:00 on a Friday, it starts Monday morning.
+ *
+ * A milestone normalises **backward** instead, because a zero-duration task is a finish instant
+ * rather than a start one. "Foundation complete" belongs at 16:00 on the day the foundation was
+ * finished, not at 08:00 the following morning. Normalising it forward like ordinary work makes
+ * every milestone appear to drift into the next working day, which is the single most visible
+ * way a Gantt chart can look wrong while being arithmetically defensible.
+ */
+export function placeStart(candidate: Date, duration: Hours, calendar: Calendar): Date {
+  return duration === 0
+    ? calendar.previousWorkingMoment(candidate)
+    : calendar.nextWorkingMoment(candidate)
+}
+
+/** Where the finish lands: the start advanced by the duration, normalised backward. */
+export function placeFinish(start: Date, duration: Hours, calendar: Calendar): Date {
+  if (duration === 0) return new Date(start.getTime())
+  return calendar.previousWorkingMoment(calendar.addWorkingTime(start, duration))
+}

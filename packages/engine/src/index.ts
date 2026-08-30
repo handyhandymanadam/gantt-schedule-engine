@@ -20,7 +20,7 @@ export type {
   WorkUnits,
 } from './types.js'
 
-export { ContinuousCalendar, continuousCalendar, MS_PER_HOUR } from './calendar.js'
+export { ContinuousCalendar, continuousCalendar, MS_PER_HOUR, placeFinish, placeStart } from './calendar.js'
 export type { Calendar } from './calendar.js'
 
 export { hostOffset, localUtcOffsetMinutes, offsetForZone } from './timezone.js'
@@ -49,6 +49,18 @@ export type {
   CriticalPathResult,
   ScheduledTask,
 } from './critical-path.js'
+
+export { autoSchedule } from './auto-schedule.js'
+export type {
+  AutoScheduleInput,
+  AutoScheduleResult,
+  ChangeReason,
+  ProposedChange,
+  ScheduleConflict,
+} from './auto-schedule.js'
+
+export { baselineEffort, calculateRemainingWork } from './progress.js'
+export type { ForecastMethod, ForecastOptions, RemainingWork } from './progress.js'
 
 export { validate } from './validate.js'
 export type {

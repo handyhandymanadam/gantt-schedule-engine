@@ -1,4 +1,4 @@
-import type { Calendar } from './calendar.js'
+import { placeFinish, placeStart, type Calendar } from './calendar.js'
 import { topologicalSort, type Edge } from './graph.js'
 import type { Hours, Link, Task } from './types.js'
 
@@ -183,14 +183,8 @@ export function calculateCriticalPath(input: CriticalPathInput): CriticalPathRes
       start = required
     }
 
-    // Start instants normalise forward to the next working moment; finish instants normalise
-    // backward. Applying the same rule to both makes milestones appear to drift into the next
-    // working period.
-    const normalisedStart = calendar.nextWorkingMoment(start)
-    const finish =
-      task.duration === 0
-        ? normalisedStart
-        : calendar.previousWorkingMoment(calendar.addWorkingTime(normalisedStart, task.duration))
+    const normalisedStart = placeStart(start, task.duration, calendar)
+    const finish = placeFinish(normalisedStart, task.duration, calendar)
 
     earlyStart.set(id, normalisedStart)
     earlyFinish.set(id, finish)
