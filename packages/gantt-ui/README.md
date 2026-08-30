@@ -27,7 +27,14 @@ const chart = createGantt(document.getElementById('chart'), {
 
 Set `editableLinks` and hovering a bar reveals a connector handle at each end. Drag from the
 finish handle onto another bar to make this task the predecessor, or from the start handle to
-make it the successor. Click an arrow to select it and press Delete to remove it.
+make it the successor.
+
+Removing one can be done three ways, because scheduling is mouse work and a mouse user should
+never have to find a keyboard shortcut to undo something they drew with the mouse:
+
+- **Right-click the arrow** and choose Remove.
+- **Click the arrow**, then click the button that appears on it.
+- **Click the arrow**, then press Delete or Backspace.
 
 ```ts
 createGantt(host, {

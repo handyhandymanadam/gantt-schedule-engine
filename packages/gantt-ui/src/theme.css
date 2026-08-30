@@ -370,3 +370,76 @@
 .gantt:focus {
   outline: none;
 }
+
+/* Hovering an arrow says it is interactive; without this nothing suggests it can be clicked. */
+.gantt-link-group:hover .gantt-link-path {
+  stroke: var(--gantt-selected);
+  stroke-width: 2.5;
+}
+
+.gantt-link-group:hover .gantt-link-head {
+  fill: var(--gantt-selected);
+}
+
+.gantt-link-remove {
+  display: none;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+.gantt-link-group[data-selected='true'] .gantt-link-remove {
+  display: block;
+}
+
+.gantt-link-remove circle {
+  fill: var(--gantt-selected);
+  stroke: var(--gantt-bg);
+  stroke-width: 1.5;
+}
+
+.gantt-link-remove:hover circle {
+  fill: var(--gantt-status-line);
+}
+
+.gantt-link-remove-cross {
+  stroke: var(--gantt-bg);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  fill: none;
+}
+
+/* ---- Context menu ---- */
+
+.gantt-menu {
+  position: absolute;
+  z-index: 10;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--gantt-border-strong);
+  border-radius: 6px;
+  background: var(--gantt-bg);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+
+.gantt-menu[hidden] {
+  display: none;
+}
+
+.gantt-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--gantt-text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gantt-menu-item:hover,
+.gantt-menu-item:focus-visible {
+  background: var(--gantt-surface);
+}

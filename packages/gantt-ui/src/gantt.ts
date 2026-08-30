@@ -127,7 +127,11 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   const body = element('div', 'gantt-body')
   timeline.append(timelineHeader, body)
 
-  root.append(grid, timeline)
+  const menu = element('div', 'gantt-menu')
+  menu.setAttribute('role', 'menu')
+  menu.hidden = true
+
+  root.append(grid, timeline, menu)
   container.append(root)
 
   // The grid scrolls only as a consequence of the timeline scrolling; it has no scrollbar of
@@ -137,7 +141,60 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
   }
   timeline.addEventListener('scroll', syncScroll)
 
+  interface MenuItem {
+    label: string
+    onSelect: () => void
+  }
+
+  /**
+   * A small context menu, positioned inside the chart.
+   *
+   * Deletion is reachable three ways on purpose: this menu, the button on a selected arrow, and
+   * the Delete key. Scheduling is mouse work, and a mouse user should never have to discover a
+   * keyboard shortcut to undo something they drew with the mouse.
+   */
+  function openMenu(clientX: number, clientY: number, items: readonly MenuItem[]): void {
+    menu.replaceChildren()
+    for (const item of items) {
+      const button = element('button', 'gantt-menu-item')
+      button.type = 'button'
+      button.setAttribute('role', 'menuitem')
+      button.textContent = item.label
+      button.addEventListener('click', () => {
+        closeMenu()
+        item.onSelect()
+      })
+      menu.append(button)
+    }
+
+    const box = root.getBoundingClientRect()
+    menu.hidden = false
+    // Clamp so a menu opened near the right or bottom edge stays inside the chart.
+    const left = Math.min(clientX - box.left, Math.max(0, box.width - menu.offsetWidth - 4))
+    const top = Math.min(clientY - box.top, Math.max(0, box.height - menu.offsetHeight - 4))
+    menu.style.left = `${Math.max(0, left)}px`
+    menu.style.top = `${Math.max(0, top)}px`
+    root.focus({ preventScroll: true })
+  }
+
+  function closeMenu(): void {
+    menu.hidden = true
+    menu.replaceChildren()
+  }
+
+  const onDocumentPointerDown = (event: Event): void => {
+    if (menu.hidden) return
+    if (event.target instanceof Node && menu.contains(event.target)) return
+    closeMenu()
+  }
+  document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  timeline.addEventListener('scroll', closeMenu)
+
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      closeMenu()
+      return
+    }
     if (event.key !== 'Delete' && event.key !== 'Backspace') return
     if (selectedLink === null || opts.editableLinks !== true) return
     event.preventDefault()
@@ -334,7 +391,9 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
       group.setAttribute('class', 'gantt-link-group')
       group.dataset['linkId'] = link.id
       group.dataset['selected'] = String(selectedLink === link.id)
-      group.append(...arrow(xOf(source.finish), from, xOf(target.start), to, rowHeight))
+
+      const drawn = arrow(xOf(source.finish), from, xOf(target.start), to, rowHeight)
+      group.append(...drawn.nodes)
 
       if (opts.editableLinks === true) {
         const hit = group.querySelector('.gantt-link-hit')
@@ -342,6 +401,31 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
           event.stopPropagation()
           instance.selectLink(link.id)
         })
+        hit?.addEventListener('contextmenu', (event) => {
+          const mouse = event as MouseEvent
+          mouse.preventDefault()
+          mouse.stopPropagation()
+          instance.selectLink(link.id)
+          openMenu(mouse.clientX, mouse.clientY, [
+            {
+              label: `Remove dependency: ${labelFor(byIdOf(link.source))} \u2192 ${labelFor(byIdOf(link.target))}`,
+              onSelect: () => instance.removeLink(link.id),
+            },
+          ])
+        })
+
+        // A visible control, because "click the thin line, then press Delete" is knowledge
+        // nobody has until they are told. The keyboard shortcut still works for anyone who does.
+        //
+        // Built for every link and revealed by CSS on the selected one, rather than created when
+        // selection changes: selection deliberately does not re-render, since rebuilding the DOM
+        // mid-gesture is what used to break dragging.
+        const remove = removeControl(drawn.mid, link.id)
+        remove.addEventListener('click', (event) => {
+          event.stopPropagation()
+          instance.removeLink(link.id)
+        })
+        group.append(remove)
       }
       svg.append(group)
     }
@@ -594,6 +678,19 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     opts.onLinksChange?.({ links, schedule, ...detail })
   }
 
+  function byIdOf(taskId: string): Task {
+    return (
+      opts.tasks.find((task) => task.id === taskId) ?? {
+        id: taskId,
+        basis: 'duration',
+        resourceCount: 1,
+        duration: 0,
+        start: new Date(0),
+        schedulingMode: 'auto',
+      }
+    )
+  }
+
   function labelFor(task: Task): string {
     return opts.labelOf?.(task) ?? task.id
   }
@@ -655,6 +752,8 @@ export function createGantt(container: HTMLElement, options: GanttOptions): Gant
     destroy() {
       disposeDrag?.()
       timeline.removeEventListener('scroll', syncScroll)
+      timeline.removeEventListener('scroll', closeMenu)
+      document.removeEventListener('pointerdown', onDocumentPointerDown, true)
       root.removeEventListener('keydown', onKeyDown)
       root.remove()
     },
@@ -772,13 +871,19 @@ function tickElement(tick: Tick, range: { from: number; to: number }, pxPerDay: 
 }
 
 /** An elbow from a predecessor's finish to a successor's start, with an arrowhead. */
+interface Arrow {
+  nodes: SVGElement[]
+  /** Midpoint of the elbow, where a control can sit without covering either bar. */
+  mid: { x: number; y: number }
+}
+
 function arrow(
   fromX: number,
   fromRow: number,
   toX: number,
   toRow: number,
   rowHeight: number,
-): SVGElement[] {
+): Arrow {
   const y1 = fromRow * rowHeight + rowHeight / 2
   const y2 = toRow * rowHeight + rowHeight / 2
   const gap = 10
@@ -801,10 +906,42 @@ function arrow(
   hit.setAttribute('class', 'gantt-link-hit')
   hit.setAttribute('d', points)
 
-  return [hit, path, head]
+  // Computed from the elbow rather than measured from the path, so it works before layout.
+  const mid =
+    toX >= fromX + gap
+      ? { x: toX - gap / 2, y: (y1 + y2) / 2 }
+      : { x: (fromX + gap / 2 + toX - gap) / 2, y: (y1 + y2) / 2 }
+
+  return { nodes: [hit, path, head], mid }
 }
 
 // ---- Small utilities ----
+
+/** A round remove button sitting on a selected dependency. */
+function removeControl(at: { x: number; y: number }, linkId: string): SVGGElement {
+  const group = svgNode('g')
+  group.setAttribute('class', 'gantt-link-remove')
+  group.dataset['linkId'] = linkId
+  group.setAttribute('role', 'button')
+  group.setAttribute('aria-label', 'Remove dependency')
+
+  const disc = svgNode('circle')
+  disc.setAttribute('cx', String(at.x))
+  disc.setAttribute('cy', String(at.y))
+  disc.setAttribute('r', '8')
+
+  const cross = svgNode('path')
+  cross.setAttribute('class', 'gantt-link-remove-cross')
+  const arm = 3.5
+  cross.setAttribute(
+    'd',
+    `M ${at.x - arm} ${at.y - arm} L ${at.x + arm} ${at.y + arm} ` +
+      `M ${at.x + arm} ${at.y - arm} L ${at.x - arm} ${at.y + arm}`,
+  )
+
+  group.append(disc, cross)
+  return group
+}
 
 function svgNode<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameMap[K] {
   return document.createElementNS('http://www.w3.org/2000/svg', tag)

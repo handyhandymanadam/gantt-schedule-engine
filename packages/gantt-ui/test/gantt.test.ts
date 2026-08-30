@@ -469,6 +469,73 @@ describe('link editing', () => {
     expect(change.links).toHaveLength(0)
   })
 
+  it('removes a dependency from the right-click menu', () => {
+    const onLinksChange = vi.fn()
+    createGantt(host, { ...base, onLinksChange })
+
+    const hit = host.querySelector('.gantt-link-hit')!
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })
+    hit.dispatchEvent(event)
+
+    // The browser's own menu must not also appear.
+    expect(event.defaultPrevented).toBe(true)
+
+    const menu = host.querySelector<HTMLElement>('.gantt-menu')!
+    expect(menu.hidden).toBe(false)
+    expect(menu.textContent).toContain('Remove dependency')
+
+    menu.querySelector<HTMLButtonElement>('.gantt-menu-item')!.click()
+    expect(onLinksChange.mock.calls[0]![0].removed).toMatchObject({ source: 'a', target: 'b' })
+    expect(menu.hidden).toBe(true)
+  })
+
+  it('closes the menu on Escape and on an outside click', () => {
+    createGantt(host, base)
+    const hit = host.querySelector('.gantt-link-hit')!
+    const menu = host.querySelector<HTMLElement>('.gantt-menu')!
+
+    hit.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    expect(menu.hidden).toBe(false)
+    host
+      .querySelector('.gantt')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(menu.hidden).toBe(true)
+
+    hit.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    expect(menu.hidden).toBe(false)
+    document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    expect(menu.hidden).toBe(true)
+  })
+
+  it('offers no menu when editing is off', () => {
+    createGantt(host, { ...base, editableLinks: false })
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })
+    host.querySelector('.gantt-link-hit')!.dispatchEvent(event)
+    expect(host.querySelector<HTMLElement>('.gantt-menu')!.hidden).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('carries a remove button on every arrow, revealed only on the selected one', () => {
+    // Built for all links and shown by CSS, because selection deliberately does not re-render.
+    const chart = createGantt(host, { ...base, links: [link('a', 'b'), link('b', 'c')] })
+    expect(host.querySelectorAll('.gantt-link-remove')).toHaveLength(2)
+
+    chart.selectLink('a->b')
+    const selectedGroups = host.querySelectorAll('.gantt-link-group[data-selected="true"]')
+    expect(selectedGroups).toHaveLength(1)
+    expect(selectedGroups[0]!.querySelector('.gantt-link-remove')).not.toBeNull()
+  })
+
+  it('removes a dependency from the button on the arrow', () => {
+    const onLinksChange = vi.fn()
+    const chart = createGantt(host, { ...base, onLinksChange })
+    chart.selectLink('a->b')
+    host
+      .querySelector<SVGGElement>('.gantt-link-remove')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(onLinksChange.mock.calls[0]![0].removed).toMatchObject({ source: 'a', target: 'b' })
+  })
+
   it('removes a dependency through the API', () => {
     const onLinksChange = vi.fn()
     const chart = createGantt(host, { ...base, onLinksChange })
