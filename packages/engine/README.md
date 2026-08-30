@@ -76,9 +76,10 @@ progress reported on a seventh of the tasks:
 | `findResourceConflicts` | 0.6 ms | 1.3 ms | 6 ms |
 | `calculateProgressVariance` | 0.6 ms | 1.5 ms | 6 ms |
 
-Two things carry that. A calendar range is whole-week arithmetic plus corrections for the few
+Three things carry that. A calendar range is whole-week arithmetic plus corrections for the few
 dates that depart from the pattern, so measuring a span costs the same whether it covers a week
-or twenty years. And conflict detection is a sweep line rather than a scan per boundary.
+or twenty years. Each day's resolved shifts are cached, because scheduling asks about the same
+days repeatedly. And conflict detection is a sweep line rather than a scan at every boundary.
 
 **Threading.** Every function is synchronous and pure over plain data, which is exactly what makes
 it easy to run in a worker: post the tasks and links across, call the function, post the result

@@ -72,6 +72,29 @@ assignments is worse than an honest flag.
 full constraint framework (ASAP/ALAP/SNET/SNLT/FNET/FNLT/MSO/MFO), split tasks, multi-skilled
 resources, WBS codes, undo/redo, export.
 
+## Performance
+
+Measured on a chained, phase-structured schedule with a working-week calendar, holidays and
+progress reported on a seventh of the tasks:
+
+| | 500 tasks | 2,000 tasks | 10,000 tasks |
+|---|---|---|---|
+| `validate` | 0.9 ms | 1.7 ms | 9 ms |
+| `calculateCriticalPath` | 4 ms | 13 ms | 74 ms |
+| `autoSchedule` | 3 ms | 8 ms | 40 ms |
+| `findResourceConflicts` | 0.6 ms | 1.3 ms | 6 ms |
+| `calculateProgressVariance` | 0.6 ms | 1.5 ms | 6 ms |
+
+Three things carry that. A calendar range is whole-week arithmetic plus corrections for the few
+dates that depart from the pattern, so measuring a span costs the same whether it covers a week or
+twenty years. Each day's resolved shifts are cached, because scheduling asks about the same days
+repeatedly. And conflict detection is a sweep line rather than a scan at every boundary.
+
+Every function is synchronous and pure over plain data, so running it in a worker is
+straightforward - but rarely worth it. Copying 10,000 tasks to a worker and back costs about
+26 ms against 40 ms of computation, so the gain is keeping the main thread free rather than
+finishing sooner.
+
 ## Development
 
 ```bash
