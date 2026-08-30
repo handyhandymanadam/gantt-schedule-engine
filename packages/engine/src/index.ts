@@ -23,6 +23,9 @@ export type {
 export { ContinuousCalendar, continuousCalendar, MS_PER_HOUR } from './calendar.js'
 export type { Calendar } from './calendar.js'
 
+export { hostOffset, localUtcOffsetMinutes, offsetForZone } from './timezone.js'
+export type { UtcOffsetResolver } from './timezone.js'
+
 export { WorkingWeekCalendar } from './working-week.js'
 export type { Shift, Weekday, WorkingWeekOptions } from './working-week.js'
 

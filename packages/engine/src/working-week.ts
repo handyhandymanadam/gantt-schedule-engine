@@ -1,4 +1,5 @@
 import { MS_PER_HOUR, type Calendar } from './calendar.js'
+import type { UtcOffsetResolver } from './timezone.js'
 import type { Hours } from './types.js'
 
 /**
@@ -12,10 +13,11 @@ import type { Hours } from './types.js'
  * exactly, which is the regression guarantee the critical-path suite relies on: the same worked
  * examples must produce the same numbers under both.
  *
- * **Time zones.** Instants are `Date`s, but working hours are wall-clock concepts. This calendar
- * maps between them with a fixed `utcOffsetMinutes`. Daylight-saving transitions are *not*
- * modelled: a schedule spanning one will drift by an hour. Fixing that properly means per-instant
- * zone lookups, which is deferred rather than approximated.
+ * **Time zones.** Instants are `Date`s, but working hours are wall-clock concepts, so something
+ * has to map between them. `utcOffsetMinutes` takes either a fixed number of minutes east of UTC
+ * or a resolver called per instant. Use a resolver for any zone with daylight saving: a fixed
+ * offset sampled today is simply wrong for dates on the far side of the next transition, which
+ * is most of what a schedule contains. See `offsetForZone` and `hostOffset`.
  */
 
 const MS_PER_MINUTE = 60_000
@@ -47,8 +49,14 @@ export interface WorkingWeekOptions {
    */
   exceptions?: Readonly<Record<string, readonly Shift[]>>
 
-  /** Fixed offset from UTC in minutes. Positive is east. Defaults to 0. */
-  utcOffsetMinutes?: number
+  /**
+   * Minutes east of UTC: `120` for UTC+2. Defaults to 0.
+   *
+   * Pass a {@link UtcOffsetResolver} instead of a number for zones with daylight saving, so the
+   * offset is resolved for each instant rather than frozen at one. `offsetForZone('Europe/Oslo')`
+   * and `hostOffset` both do this.
+   */
+  utcOffsetMinutes?: number | UtcOffsetResolver
 }
 
 /** Minute-of-day interval, resolved from a {@link Shift}. */
@@ -74,15 +82,21 @@ export class WorkingWeekCalendar implements Calendar {
   private readonly week: Map<Weekday, Interval[]>
   private readonly holidays: Set<string>
   private readonly exceptions: Map<string, Interval[]>
-  private readonly offsetMs: number
+  private readonly offset: number | UtcOffsetResolver
 
   constructor(options: WorkingWeekOptions = {}) {
     const { week = DEFAULT_WEEK, holidays = [], exceptions = {}, utcOffsetMinutes = 0 } = options
 
-    if (!Number.isInteger(utcOffsetMinutes) || Math.abs(utcOffsetMinutes) > 16 * 60) {
-      throw new RangeError('utcOffsetMinutes must be a whole number of minutes within +/- 16 hours')
+    if (typeof utcOffsetMinutes === 'number') {
+      if (!Number.isInteger(utcOffsetMinutes) || Math.abs(utcOffsetMinutes) > 16 * 60) {
+        throw new RangeError(
+          'utcOffsetMinutes must be a whole number of minutes within +/- 16 hours, or a resolver function',
+        )
+      }
+    } else if (typeof utcOffsetMinutes !== 'function') {
+      throw new TypeError('utcOffsetMinutes must be a number of minutes or a resolver function')
     }
-    this.offsetMs = utcOffsetMinutes * MS_PER_MINUTE
+    this.offset = utcOffsetMinutes
 
     this.week = new Map()
     for (let day = 0 as Weekday; day <= 6; day = (day + 1) as Weekday) {
@@ -112,7 +126,7 @@ export class WorkingWeekCalendar implements Calendar {
   }
 
   isWorkingTime(at: Date): boolean {
-    const localMs = at.getTime() + this.offsetMs
+    const localMs = at.getTime() + this.offsetMsAt(at)
     const dayIndex = Math.floor(localMs / MS_PER_DAY)
     const minuteOfDay = (localMs - dayIndex * MS_PER_DAY) / MS_PER_MINUTE
     return this.intervalsForDay(dayIndex).some(
@@ -241,13 +255,32 @@ export class WorkingWeekCalendar implements Calendar {
     throw new RangeError('Ran past the scan horizon while subtracting working time')
   }
 
+  /** Offset in milliseconds at a given instant. */
+  private offsetMsAt(at: Date): number {
+    return (typeof this.offset === 'number' ? this.offset : this.offset(at)) * MS_PER_MINUTE
+  }
+
+  /**
+   * Offset in milliseconds for a local day, probed near local midday.
+   *
+   * Probing mid-day rather than at midnight keeps the sample well clear of the transition itself,
+   * which is what makes a single lookup per day stable. A transition day is therefore treated as
+   * having its post-transition offset throughout; the residual error is confined to that one day
+   * instead of running for months, which is what a fixed offset does.
+   */
+  private offsetMsForDay(dayIndex: number): number {
+    if (typeof this.offset === 'number') return this.offset * MS_PER_MINUTE
+    const probe = new Date(dayIndex * MS_PER_DAY + 12 * MS_PER_HOUR)
+    return this.offset(probe) * MS_PER_MINUTE
+  }
+
   private dayIndexOf(at: Date): number {
-    return Math.floor((at.getTime() + this.offsetMs) / MS_PER_DAY)
+    return Math.floor((at.getTime() + this.offsetMsAt(at)) / MS_PER_DAY)
   }
 
   /** Working intervals for a local day index, as absolute UTC millisecond spans. */
   private spansForDay(dayIndex: number): Interval[] {
-    const midnightUtc = dayIndex * MS_PER_DAY - this.offsetMs
+    const midnightUtc = dayIndex * MS_PER_DAY - this.offsetMsForDay(dayIndex)
     return this.intervalsForDay(dayIndex).map((interval) => ({
       start: midnightUtc + interval.start * MS_PER_MINUTE,
       end: midnightUtc + interval.end * MS_PER_MINUTE,

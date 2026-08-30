@@ -249,11 +249,19 @@ a resource roster it is coupled to a schema and stops being reusable.
 
 ## Deferred
 
-**Daylight saving.** `WorkingWeekCalendar` maps wall-clock shifts to instants through a fixed
-UTC offset, so a schedule spanning a DST transition drifts by an hour. Handling it properly means
-resolving the zone offset per instant rather than once per calendar. That is deferred rather than
-approximated, because a calendar that is subtly wrong twice a year is worse than one whose limits
-are stated.
+**Time zones and daylight saving.** A working week is wall-clock ("08:00 to 16:00, Monday to
+Friday") but a schedule is made of instants, so something has to map between them. The calendar
+takes either a fixed offset in minutes or a resolver called per instant. A fixed offset sampled
+today is wrong for every date beyond the next transition, which is most of what a schedule
+contains, so `offsetForZone('America/New_York')` resolves the offset for each instant via `Intl`
+with no dependency to install, and `hostOffset` does the same for whatever zone the host runs in.
+Prefer the named zone when the schedule belongs to a *place*: a job site keeps its own hours
+regardless of where the person looking at it happens to be.
+
+One residual limit: day boundaries are resolved once per day, probed near local midday, so a
+transition day is treated as having its post-transition offset throughout. The error is bounded
+to that single day rather than running for months, and probing at midday keeps the sample clear
+of the transition itself.
 
 Additive later with no rework: time-cost tradeoff analysis (crashing — because `basis` is recorded
 per task, the engine can already identify which critical-path tasks are work-driven and therefore

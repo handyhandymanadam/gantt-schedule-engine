@@ -39,8 +39,9 @@ what to do with the result. The engine holds no state, fetches nothing, and muta
   than automatically resolved, and annotated with which tasks can absorb the conflict.
 - **`validate`** — one authoritative rule set, including dependency-cycle detection. Mirror it in
   your client rather than hand-writing a second copy that drifts.
-- **`Calendar`** — the working-time port. A continuous 24/7 implementation ships as the default;
-  supply your own for real working weeks and holidays.
+- **`WorkingWeekCalendar`** — working days, split shifts, holidays and one-off exceptions, with
+  time zones resolved per instant so schedules stay correct across daylight-saving transitions.
+  A continuous 24/7 calendar ships as the default.
 
 ## The model in brief
 
